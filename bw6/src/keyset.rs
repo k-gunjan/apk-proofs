@@ -10,6 +10,9 @@ use fflonk::pcs::{CommitterKey, PCS};
 use crate::domains::Domains;
 use crate::{hash_to_curve, NewKzgBw6};
 
+use ark_bw6_761::Config as BigCurveCongig;
+use ark_ec::bw6::{self, BW6Config};
+pub type G1Affine = bw6::G1Affine<BigCurveCongig>;
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
 // domain_size := KeysetCommitment::domain.size and
@@ -32,7 +35,7 @@ use crate::{hash_to_curve, NewKzgBw6};
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct KeysetCommitment {
     // Per-coordinate KZG commitments to a vector of BLS public keys on BLS12-377 represented in affine.
-    pub pks_comm: (ark_bw6_761::G1Affine, ark_bw6_761::G1Affine),
+    pub pks_comm: (G1Affine, G1Affine),
     // Determines domain used to interpolate the vectors above.
     pub log_domain_size: u32,
 }
@@ -89,7 +92,7 @@ impl Keyset {
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
-    pub fn commit(&self, kzg_pk: &KzgCommitterKey<ark_bw6_761::G1Affine>) -> KeysetCommitment {
+    pub fn commit(&self, kzg_pk: &KzgCommitterKey<G1Affine>) -> KeysetCommitment {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
         let pks_x_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
         let pks_y_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
