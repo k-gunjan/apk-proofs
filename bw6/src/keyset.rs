@@ -1,4 +1,3 @@
-use ark_bls12_377::G1Projective;
 use ark_bw6_761::Fr;
 use ark_ec::CurveGroup;
 use ark_poly::univariate::DensePolynomial;
@@ -10,9 +9,14 @@ use fflonk::pcs::{CommitterKey, PCS};
 use crate::domains::Domains;
 use crate::{hash_to_curve, NewKzgBw6};
 
+use ark_bls12_377::Config as Config377;
 use ark_bw6_761::Config as BigCurveCongig;
-use ark_ec::bw6::{self, BW6Config};
+use ark_ec::{
+    bls12,
+    bw6::{self, BW6Config},
+};
 pub type G1Affine = bw6::G1Affine<BigCurveCongig>;
+pub type G1Projective = bls12::G1Projective<Config377>;
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
 // domain_size := KeysetCommitment::domain.size and
@@ -60,7 +64,7 @@ impl Keyset {
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
-        let padding_pk = hash_to_curve::<ark_bls12_377::G1Projective>(b"apk-proofs");
+        let padding_pk = hash_to_curve::<G1Projective>(b"apk-proofs");
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
@@ -102,7 +106,7 @@ impl Keyset {
         }
     }
 
-    pub fn aggregate(&self, bitmask: &[bool]) -> ark_bls12_377::G1Projective {
+    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective {
         assert_eq!(bitmask.len(), self.size());
         bitmask
             .iter()
