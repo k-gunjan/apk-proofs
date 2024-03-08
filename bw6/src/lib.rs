@@ -2,6 +2,7 @@
 
 use ark_bls12_377::G1Affine;
 use ark_bw6_761::{Fr, BW6_761};
+use ark_ec::bw6::BW6;
 use ark_ec::CurveGroup;
 use ark_ff::MontFp;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -17,6 +18,7 @@ use crate::piop::bitmask_packing::{
 };
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
+use ark_bw6_761::Config as BigCurveCongig;
 
 pub use self::prover::*;
 pub use self::verifier::*;
@@ -39,7 +41,7 @@ mod keyset;
 pub mod setup;
 pub mod test_helpers; //TODO: cfgtest
 
-type NewKzgBw6 = KZG<BW6_761>;
+type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones

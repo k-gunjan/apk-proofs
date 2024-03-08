@@ -13,7 +13,7 @@ use crate::piop::{
 };
 use crate::utils::LagrangeEvaluations;
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
-
+use ark_bw6_761::Config as BigCurveCongig;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingCommitments {
     affine_addition_commitments: PartialSumsAndBitmaskCommitments,
@@ -73,7 +73,7 @@ impl ProverProtocol for CountingScheme {
     type E = CountingEvaluations;
     type PI = CountingPublicInput;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset) -> Self {
+    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig>) -> Self {
         CountingScheme {
             affine_addition_registers: AffineAdditionRegisters::new(
                 domains.clone(),
@@ -211,7 +211,7 @@ mod tests {
         let m = n - 1;
 
         let kzg_params = NewKzgBw6::setup(m, rng);
-        let mut keyset = Keyset::new(random_pks(m, rng));
+        let mut keyset = Keyset::<BigCurveCongig>::new(random_pks(m, rng));
         keyset.amplify();
         let mut scheme = CountingScheme::init(
             Domains::new(n),

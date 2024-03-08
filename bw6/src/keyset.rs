@@ -1,15 +1,15 @@
+use crate::domains::Domains;
+use crate::{hash_to_curve, NewKzgBw6};
 use ark_ec::CurveGroup;
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use ark_std::marker::PhantomData;
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
 
-use crate::domains::Domains;
-use crate::{hash_to_curve, NewKzgBw6};
-
 use ark_bls12_377::Config as Config377;
-// use ark_bw6_761::Config as BigCurveCongig;
+use ark_bw6_761::Config as BigCurveCongig;
 use ark_bw6_761::FrConfig as FrConfig761;
 use ark_ec::{
     bls12,
@@ -46,7 +46,7 @@ pub struct KeysetCommitment<Config761: BW6Config> {
     pub log_domain_size: u32,
 }
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct Keyset<Config761: BW6Config> {
     // Actual public keys, no padding.
     pub pks: Vec<G1Projective>,
@@ -57,6 +57,7 @@ pub struct Keyset<Config761: BW6Config> {
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
     pub pks_evals_x4: Option<[Evaluations<Fr, Radix2EvaluationDomain<Fr>>; 2]>,
+    _marker: PhantomData<Config761>,
 }
 
 impl<Config761: BW6Config> Keyset<Config761> {
@@ -81,6 +82,7 @@ impl<Config761: BW6Config> Keyset<Config761> {
             domain,
             pks_polys: [pks_x_poly, pks_y_poly],
             pks_evals_x4: None,
+            _marker: Default::default(),
         }
     }
 
@@ -105,7 +107,7 @@ impl<Config761: BW6Config> Keyset<Config761> {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
         let pks_x_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
         let pks_y_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
-        KeysetCommitment::<Config761> {
+        KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,
         }
@@ -119,5 +121,17 @@ impl<Config761: BW6Config> Keyset<Config761> {
             .filter(|(b, _p)| **b)
             .map(|(_b, p)| p)
             .sum()
+    }
+}
+
+impl<Config761: BW6Config> Clone for Keyset<Config761> {
+    fn clone(&self) -> Self {
+        Keyset {
+            pks: self.pks.clone(),
+            pks_polys: self.pks_polys.clone(),
+            domain: self.domain.clone(),
+            pks_evals_x4: self.pks_evals_x4.clone(),
+            _marker: PhantomData,
+        }
     }
 }

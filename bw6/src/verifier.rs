@@ -25,11 +25,11 @@ use crate::{
     endo, utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment,
     NewKzgBw6, PackedProof, Proof, PublicInput, RegisterCommitments, SimpleProof,
 };
-
+use ark_bw6_761::Config as BigCurveCongig;
 pub struct Verifier {
     domain: Radix2EvaluationDomain<Fr>,
     kzg_pvk: KzgVerifierKey<BW6_761>,
-    pks_comm: KeysetCommitment,
+    pks_comm: KeysetCommitment<BigCurveCongig>,
     preprocessed_transcript: Transcript,
 }
 
@@ -245,7 +245,7 @@ impl Verifier {
 
     pub fn new(
         kzg_vk: RawKzgVerifierKey<BW6_761>,
-        pks_comm: KeysetCommitment,
+        pks_comm: KeysetCommitment<BigCurveCongig>,
         mut empty_transcript: Transcript,
     ) -> Self {
         let domain_size = 2usize.pow(pks_comm.log_domain_size);

@@ -8,7 +8,7 @@ use crate::piop::bitmask_packing::{
 };
 use crate::piop::ProverProtocol;
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-
+use ark_bw6_761::Config as BigCurveCongig;
 pub struct PackedRegisterBuilder {
     bitmask: Bitmask,
     affine_addition_registers: AffineAdditionRegisters,
@@ -22,7 +22,7 @@ impl ProverProtocol for PackedRegisterBuilder {
     type E = SuccinctAccountableRegisterEvaluations;
     type PI = AccountablePublicInput;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset) -> Self {
+    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig>) -> Self {
         PackedRegisterBuilder {
             bitmask: bitmask.clone(),
             affine_addition_registers: AffineAdditionRegisters::new(

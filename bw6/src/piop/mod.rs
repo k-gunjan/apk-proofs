@@ -14,7 +14,7 @@ pub mod bitmask_packing;
 pub mod basic;
 pub mod counting;
 pub mod packed;
-
+use ark_bw6_761::Config as BigCurveCongig;
 pub trait RegisterCommitments: CanonicalSerialize + CanonicalDeserialize {
     fn as_vec(&self) -> Vec<G1Affine>;
 }
@@ -97,7 +97,7 @@ pub trait ProverProtocol {
     type E: RegisterEvaluations;
     type PI: PublicInput;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset) -> Self;
+    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig>) -> Self;
 
     // These 2 methods together return register polynomials the prover should commit to.
     // The 2nd one is used only in the "packed" scheme as it requires an additional challenge

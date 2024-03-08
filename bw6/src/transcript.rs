@@ -7,7 +7,7 @@ use merlin::Transcript;
 
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
 use crate::{KeysetCommitment, PublicInput};
-
+use ark_bw6_761::Config as BigCurveCongig;
 pub(crate) trait ApkTranscript {
     fn set_protocol_params(
         &mut self,
@@ -18,7 +18,7 @@ pub(crate) trait ApkTranscript {
         self._append_serializable(b"vk", kzg_vk);
     }
 
-    fn set_keyset_commitment(&mut self, keyset_commitment: &KeysetCommitment) {
+    fn set_keyset_commitment(&mut self, keyset_commitment: &KeysetCommitment<BigCurveCongig>) {
         self._append_serializable(b"keyset_commitment", keyset_commitment);
     }
 
