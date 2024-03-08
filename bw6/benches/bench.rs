@@ -1,48 +1,57 @@
 extern crate apk_proofs;
 
 use ark_bw6_761::Fr;
-use ark_ec::{AffineRepr, CurveGroup};
 use ark_ec::VariableBaseMSM;
+use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, Field};
-use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_std::{test_rng, UniformRand};
-use criterion::{BenchmarkId, black_box, Criterion, criterion_group, criterion_main, Throughput};
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use fflonk::pcs::PcsParams;
 
-use apk_proofs::{Keyset, setup};
+use apk_proofs::{setup, Keyset};
 
 fn barycentric_evaluation<F: Field>(c: &mut Criterion, n: u32) {
-    use ark_poly::{Evaluations, EvaluationDomain, Radix2EvaluationDomain, Polynomial};
+    use ark_poly::{EvaluationDomain, Evaluations, Polynomial, Radix2EvaluationDomain};
 
     let rng = &mut test_rng();
     let n = std::convert::TryInto::try_into(n).unwrap();
     let domain = Radix2EvaluationDomain::new(n).unwrap();
-    let evals = (0..n).map(|_| ark_bw6_761::Fr::rand(rng)).collect::<Vec<_>>();
+    let evals = (0..n)
+        .map(|_| ark_bw6_761::Fr::rand(rng))
+        .collect::<Vec<_>>();
     let evals2 = evals.clone();
     let z = ark_bw6_761::Fr::rand(rng);
 
     c.bench_function("barycentric_evaluation", move |b| {
         b.iter(|| {
-            apk_proofs::utils::barycentric_eval_at(black_box(z), black_box(&evals), black_box(domain))
+            apk_proofs::utils::barycentric_eval_at(
+                black_box(z),
+                black_box(&evals),
+                black_box(domain),
+            )
         })
     });
 
     let evals = Evaluations::from_vec_and_domain(evals2, domain);
     c.bench_function("interpolate + evaluate", move |b| {
         b.iter(|| {
-            black_box(&evals).interpolate_by_ref().evaluate(black_box(&z));
+            black_box(&evals)
+                .interpolate_by_ref()
+                .evaluate(black_box(&z));
         })
     });
 }
-
 
 fn msm<G: AffineRepr>(c: &mut Criterion, n: usize) {
     let rng = &mut test_rng();
 
     let nu = G::ScalarField::rand(rng);
     let scalars = (0..n).map(|i| nu.pow([i as u64])).collect::<Vec<_>>();
-    let bases = (0..n).map(|_| G::Group::rand(rng).into_affine()).collect::<Vec<_>>();
+    let bases = (0..n)
+        .map(|_| G::Group::rand(rng).into_affine())
+        .collect::<Vec<_>>();
 
     {
         let (scalars, bases) = (scalars.clone(), bases.clone());
@@ -84,8 +93,8 @@ fn bw6_subgroup_check(c: &mut Criterion) {
 }
 
 fn amplification(c: &mut Criterion) {
-    use ark_poly::{EvaluationDomain, Radix2EvaluationDomain, DenseUVPolynomial};
     use apk_proofs::domains::Domains;
+    use ark_poly::{DenseUVPolynomial, EvaluationDomain, Radix2EvaluationDomain};
 
     let mut group = c.benchmark_group("amplification");
 
@@ -101,43 +110,45 @@ fn amplification(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("2x", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
-                poly.evaluate_over_domain_by_ref(domains.domain2x)
-            }),
+            |b, _| {
+                b.iter(|| {
+                    let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain)
+                        .interpolate();
+                    poly.evaluate_over_domain_by_ref(domains.domain2x)
+                })
+            },
         );
 
         group.bench_with_input(
             BenchmarkId::new("2x-coset", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                domains.amplify_x2(evals.clone())
-            }),
+            |b, _| b.iter(|| domains.amplify_x2(evals.clone())),
         );
 
         group.bench_with_input(
             BenchmarkId::new("4x", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
-                poly.evaluate_over_domain_by_ref(domains.domain4x)
-            }),
+            |b, _| {
+                b.iter(|| {
+                    let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain)
+                        .interpolate();
+                    poly.evaluate_over_domain_by_ref(domains.domain4x)
+                })
+            },
         );
 
         group.bench_with_input(
             BenchmarkId::new("4x-coset", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                domains.amplify_x4(evals.clone())
-            }),
+            |b, _| b.iter(|| domains.amplify_x4(evals.clone())),
         );
     }
 }
 
 fn verification(c: &mut Criterion) {
-    use apk_proofs::{Prover, Verifier, Bitmask, bls};
+    use apk_proofs::{bls, Bitmask, Prover, Verifier};
     use merlin::Transcript;
-    use rand::{Rng, seq::SliceRandom};
+    use rand::{seq::SliceRandom, Rng};
     use std::convert::TryInto;
 
     let mut group = c.benchmark_group("verification");
@@ -147,7 +158,9 @@ fn verification(c: &mut Criterion) {
 
     for log_domain_size in log_domain_size_range {
         let keyset_size = (2u32.pow(log_domain_size) - 1) as usize;
-        let keyset = (0..keyset_size).map(|_| ark_bls12_377::G1Projective::rand(rng)).collect();
+        let keyset = (0..keyset_size)
+            .map(|_| ark_bls12_377::G1Projective::rand(rng))
+            .collect();
         let keyset = Keyset::new(keyset);
         let kzg_params = setup::generate_for_keyset(keyset_size, rng);
         let pks_comm = keyset.commit(&kzg_params.ck());
@@ -175,29 +188,35 @@ fn verification(c: &mut Criterion) {
         group.bench_with_input(
             BenchmarkId::new("basic", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                let verifier = create_verifier();
-                verifier.verify_simple(&proof_basic.1, &proof_basic.0);
-            }),
+            |b, _| {
+                b.iter(|| {
+                    let verifier = create_verifier();
+                    verifier.verify_simple(&proof_basic.1, &proof_basic.0);
+                })
+            },
         );
 
         group.bench_with_input(
             BenchmarkId::new("packed", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                let verifier = create_verifier();
-                verifier.verify_packed(&proof_packed.1, &proof_packed.0);
-            }),
+            |b, _| {
+                b.iter(|| {
+                    let verifier = create_verifier();
+                    verifier.verify_packed(&proof_packed.1, &proof_packed.0);
+                })
+            },
         );
 
         let count = bitmask.count_ones();
         group.bench_with_input(
             BenchmarkId::new("counting", log_domain_size),
             &log_domain_size,
-            |b, _| b.iter(|| {
-                let verifier = create_verifier();
-                verifier.verify_counting(&proof_counting.1, &proof_counting.0);
-            }),
+            |b, _| {
+                b.iter(|| {
+                    let verifier = create_verifier();
+                    verifier.verify_counting(&proof_counting.1, &proof_counting.0);
+                })
+            },
         );
     }
 
@@ -212,7 +231,7 @@ fn fft<F: FftField, D: EvaluationDomain<F>>(c: &mut Criterion) {
     for logn in 10..=16 {
         let n = 2usize.pow(logn);
         let domain = D::new(n).unwrap();
-        let poly = DensePolynomial::<F>::rand(n-1, rng);
+        let poly = DensePolynomial::<F>::rand(n - 1, rng);
         let coeffs = poly.coeffs;
 
         group.throughput(Throughput::Elements(n as u64));
@@ -222,7 +241,6 @@ fn fft<F: FftField, D: EvaluationDomain<F>>(c: &mut Criterion) {
     }
     group.finish();
 }
-
 
 fn components(c: &mut Criterion) {
     msm::<ark_bw6_761::G1Affine>(c, 6);

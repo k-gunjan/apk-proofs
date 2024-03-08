@@ -1,38 +1,41 @@
 use ark_bls12_377::{Fq as Fr, G1Projective};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::{One, test_rng, Zero};
-use ark_std::{end_timer, start_timer, UniformRand};
 use ark_std::rand::Rng;
+use ark_std::{end_timer, start_timer, UniformRand};
+use ark_std::{test_rng, One, Zero};
 use fflonk::pcs::PcsParams;
 use merlin::Transcript;
 
-use crate::{Bitmask, Keyset, Proof, Prover, PublicInput, setup, Verifier};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
+use crate::{setup, Bitmask, Keyset, Proof, Prover, PublicInput, Verifier};
 
 pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<bool> {
     (0..n).map(|_| rng.gen_bool(density)).collect()
 }
 
 pub(crate) fn _random_bitmask<R: Rng>(n: usize, rng: &mut R) -> Vec<Fr> {
-    _random_bits(n, 2.0 / 3.0, rng).into_iter()
+    _random_bits(n, 2.0 / 3.0, rng)
+        .into_iter()
         .map(|b| if b { Fr::one() } else { Fr::zero() })
         .collect()
 }
 
 pub(crate) fn random_pks<R: Rng>(n: usize, rng: &mut R) -> Vec<ark_bls12_377::G1Projective> {
-    (0..n)
-        .map(|_| G1Projective::rand(rng))
-        .collect()
+    (0..n).map(|_| G1Projective::rand(rng)).collect()
 }
 
-fn _test_prove_verify<P, V, PI, E, C, AC>(prove: P, verify: V, log_domain_size: u32, proof_size: usize)
-    where
-        P: Fn(Prover, Bitmask) -> (Proof<E, C, AC>, PI),
-        V: Fn(Verifier, Proof<E, C, AC>, PI) -> bool,
-        PI: PublicInput,
-        E: RegisterEvaluations,
-        C: RegisterCommitments,
-        AC: RegisterCommitments
+fn _test_prove_verify<P, V, PI, E, C, AC>(
+    prove: P,
+    verify: V,
+    log_domain_size: u32,
+    proof_size: usize,
+) where
+    P: Fn(Prover, Bitmask) -> (Proof<E, C, AC>, PI),
+    V: Fn(Verifier, Proof<E, C, AC>, PI) -> bool,
+    PI: PublicInput,
+    E: RegisterEvaluations,
+    C: RegisterCommitments,
+    AC: RegisterCommitments,
 {
     let rng = &mut test_rng();
 
@@ -53,13 +56,15 @@ fn _test_prove_verify<P, V, PI, E, C, AC>(prove: P, verify: V, log_domain_size: 
         keyset,
         &pks_comm,
         kzg_params.clone(), //TODO
-        Transcript::new(b"apk_proof")
+        Transcript::new(b"apk_proof"),
     );
     end_timer!(t_prover_new);
 
     let verifier = Verifier::new(kzg_params.raw_vk(), pks_comm, Transcript::new(b"apk_proof"));
 
-    let bits = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect::<Vec<_>>();
+    let bits = (0..keyset_size)
+        .map(|_| rng.gen_bool(2.0 / 3.0))
+        .collect::<Vec<_>>();
     let b = Bitmask::from_bits(&bits);
 
     let prove_ = start_timer!(|| "BW6 prove");
@@ -67,7 +72,9 @@ fn _test_prove_verify<P, V, PI, E, C, AC>(prove: P, verify: V, log_domain_size: 
     end_timer!(prove_);
 
     let mut serialized_proof = vec![0; proof.compressed_size()];
-    proof.serialize_compressed(&mut serialized_proof[..]).unwrap();
+    proof
+        .serialize_compressed(&mut serialized_proof[..])
+        .unwrap();
     let proof = Proof::<E, C, AC>::deserialize_compressed(&serialized_proof[..]).unwrap();
 
     assert_eq!(proof.compressed_size(), proof_size);
@@ -79,13 +86,12 @@ fn _test_prove_verify<P, V, PI, E, C, AC>(prove: P, verify: V, log_domain_size: 
     assert!(valid);
 }
 
-
 pub fn test_simple_scheme(log_domain_size: u32) {
     _test_prove_verify(
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, proof, public_input| verifier.verify_simple(&public_input, &proof),
         log_domain_size,
-        (5 * 2 + 6) * 48 // 5C + 6F
+        (5 * 2 + 6) * 48, // 5C + 6F
     );
 }
 
@@ -94,7 +100,7 @@ pub fn test_packed_scheme(log_domain_size: u32) {
         |prover, bitmask| prover.prove_packed(bitmask),
         |verifier, proof, public_input| verifier.verify_packed(&public_input, &proof),
         log_domain_size,
-        (8 * 2 + 9) * 48 // 8C + 9F
+        (8 * 2 + 9) * 48, // 8C + 9F
     );
 }
 
@@ -103,6 +109,6 @@ pub fn test_counting_scheme(log_domain_size: u32) {
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, proof, public_input| verifier.verify_counting(&public_input, &proof),
         log_domain_size,
-        (7 * 2 + 8) * 48 // 7C + 8F
+        (7 * 2 + 8) * 48, // 7C + 8F
     );
 }

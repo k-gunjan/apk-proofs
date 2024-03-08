@@ -2,8 +2,8 @@ use std::borrow::Borrow;
 use std::ops::Neg;
 
 use ark_bls12_377::{Bls12_377, Fr, G1Affine, G1Projective, G2Projective};
-use ark_ec::{AffineRepr, CurveGroup, Group};
 use ark_ec::pairing::Pairing;
+use ark_ec::{AffineRepr, CurveGroup, Group};
 use ark_ff::{UniformRand, Zero};
 use ark_serialize::*;
 use rand::Rng;
@@ -24,7 +24,7 @@ impl AsRef<G2Projective> for Signature {
 }
 
 impl Signature {
-    pub fn aggregate<S: Borrow<Signature>>(signatures: impl IntoIterator<Item=S>) -> Signature {
+    pub fn aggregate<S: Borrow<Signature>>(signatures: impl IntoIterator<Item = S>) -> Signature {
         signatures
             .into_iter()
             .map(|s| s.borrow().0)
@@ -32,8 +32,6 @@ impl Signature {
             .into()
     }
 }
-
-
 
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
 pub struct SecretKey(Fr);
@@ -59,8 +57,6 @@ impl SecretKey {
         (*message * self.as_ref()).into()
     }
 }
-
-
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash, CanonicalSerialize, CanonicalDeserialize)]
 pub struct PublicKey(pub G1Projective); // TODO: remove pub
@@ -89,12 +85,11 @@ impl PublicKey {
     pub fn verify(&self, signature: &Signature, message: &G2Projective) -> bool {
         Bls12_377::multi_pairing(
             [G1Affine::generator().neg(), self.0.into_affine()],
-            [signature.as_ref().into_affine(), message.into_affine()]
-        ).is_zero()
+            [signature.as_ref().into_affine(), message.into_affine()],
+        )
+        .is_zero()
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -110,7 +105,9 @@ mod tests {
         let sks = (0..10).map(|_| SecretKey::new(rng)).collect::<Vec<_>>();
         let pks = sks.iter().map(PublicKey::from).collect::<Vec<_>>();
         let sigs = sks.iter().map(|sk| sk.sign(&message)).collect::<Vec<_>>();
-        pks.iter().zip(sigs.iter()).for_each(|(pk, sig)| assert!(pk.verify(sig, &message)));
+        pks.iter()
+            .zip(sigs.iter())
+            .for_each(|(pk, sig)| assert!(pk.verify(sig, &message)));
 
         let apk = PublicKey::aggregate(pks);
         let asig = Signature::aggregate(sigs);

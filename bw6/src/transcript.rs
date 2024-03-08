@@ -1,16 +1,19 @@
-use ark_bw6_761::{BW6_761, Fr, G1Affine};
+use ark_bw6_761::{Fr, G1Affine, BW6_761};
 use ark_ff::Field;
 use ark_poly::Radix2EvaluationDomain;
 use ark_serialize::CanonicalSerialize;
 use fflonk::pcs::kzg::params::RawKzgVerifierKey;
 use merlin::Transcript;
 
-use crate::{KeysetCommitment, PublicInput};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
+use crate::{KeysetCommitment, PublicInput};
 
 pub(crate) trait ApkTranscript {
-
-    fn set_protocol_params(&mut self, domain: &Radix2EvaluationDomain<Fr>, kzg_vk: &RawKzgVerifierKey<BW6_761>) {
+    fn set_protocol_params(
+        &mut self,
+        domain: &Radix2EvaluationDomain<Fr>,
+        kzg_vk: &RawKzgVerifierKey<BW6_761>,
+    ) {
         self._append_serializable(b"domain", domain);
         self._append_serializable(b"vk", kzg_vk);
     }
@@ -31,7 +34,10 @@ pub(crate) trait ApkTranscript {
         self._get_128_bit_challenge(b"bitmask_aggregation")
     }
 
-    fn append_2nd_round_register_commitments(&mut self, register_commitments: &impl RegisterCommitments) {
+    fn append_2nd_round_register_commitments(
+        &mut self,
+        register_commitments: &impl RegisterCommitments,
+    ) {
         self._append_serializable(b"2nd_round_register_commitments", register_commitments);
     }
 
@@ -47,7 +53,12 @@ pub(crate) trait ApkTranscript {
         self._get_128_bit_challenge(b"evaluation_point")
     }
 
-    fn append_evaluations(&mut self, evals: &impl RegisterEvaluations, q_at_zeta: &Fr, r_at_zeta_omega: &Fr) {
+    fn append_evaluations(
+        &mut self,
+        evals: &impl RegisterEvaluations,
+        q_at_zeta: &Fr,
+        r_at_zeta_omega: &Fr,
+    ) {
         self._append_serializable(b"register_evaluations", evals);
         self._append_serializable(b"quotient_evaluation", q_at_zeta);
         self._append_serializable(b"shifted_linearization_evaluation", r_at_zeta_omega);
@@ -65,7 +76,6 @@ pub(crate) trait ApkTranscript {
 }
 
 impl ApkTranscript for Transcript {
-
     fn _get_128_bit_challenge(&mut self, label: &'static [u8]) -> Fr {
         let mut buf = [0u8; 16];
         self.challenge_bytes(label, &mut buf);

@@ -2,10 +2,12 @@ use ark_bw6_761::Fr;
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
-use crate::{AccountablePublicInput, Bitmask, Keyset, utils};
 use crate::domains::Domains;
+use crate::piop::affine_addition::{
+    AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials,
+};
 use crate::piop::{ProverProtocol, RegisterEvaluations};
-use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials};
+use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AffineAdditionEvaluationsWithoutBitmask {
@@ -37,7 +39,7 @@ impl ProverProtocol for BasicRegisterBuilder {
 
     fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset) -> Self {
         BasicRegisterBuilder {
-            registers:  AffineAdditionRegisters::new(domains, keyset, &bitmask.to_bits()),
+            registers: AffineAdditionRegisters::new(domains, keyset, &bitmask.to_bits()),
             register_evaluations: None,
         }
     }
@@ -61,7 +63,10 @@ impl ProverProtocol for BasicRegisterBuilder {
     }
 
     // bitmask register polynomial is not committed to...
-    fn evaluate_register_polynomials(&mut self, point: Fr) -> AffineAdditionEvaluationsWithoutBitmask {
+    fn evaluate_register_polynomials(
+        &mut self,
+        point: Fr,
+    ) -> AffineAdditionEvaluationsWithoutBitmask {
         let evals: AffineAdditionEvaluations = self.registers.evaluate_register_polynomials(point);
         self.register_evaluations = Some(evals.clone());
         AffineAdditionEvaluationsWithoutBitmask {

@@ -1,20 +1,19 @@
 use ark_bw6_761::{Fr, G1Affine};
 use ark_ff::Zero;
-use ark_poly::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
+use ark_poly::Radix2EvaluationDomain;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
-use crate::{Bitmask, Keyset, PublicInput, utils};
 use crate::domains::Domains;
+use crate::{utils, Bitmask, Keyset, PublicInput};
 
 pub mod affine_addition;
-pub mod bitmask_packing;
 pub mod bit_counting;
+pub mod bitmask_packing;
 
 pub mod basic;
-pub mod packed;
 pub mod counting;
-
+pub mod packed;
 
 pub trait RegisterCommitments: CanonicalSerialize + CanonicalDeserialize {
     fn as_vec(&self) -> Vec<G1Affine>;
@@ -115,7 +114,11 @@ pub trait ProverProtocol {
     fn compute_constraint_polynomials(&self) -> Vec<DensePolynomial<Fr>>;
 
     //TODO: remove domains param
-    fn compute_quotient_polynomial(&self, phi: Fr, domain: Radix2EvaluationDomain<Fr>) -> DensePolynomial<Fr> {
+    fn compute_quotient_polynomial(
+        &self,
+        phi: Fr,
+        domain: Radix2EvaluationDomain<Fr>,
+    ) -> DensePolynomial<Fr> {
         let w = utils::randomize(phi, &self.compute_constraint_polynomials());
         let (q_poly, r) = w.divide_by_vanishing_poly(domain).unwrap();
         assert_eq!(r, DensePolynomial::zero());

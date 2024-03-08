@@ -9,14 +9,14 @@ use crate::domains::Domains;
 use crate::{hash_to_curve, NewKzgBw6};
 
 use ark_bls12_377::Config as Config377;
-use ark_bw6_761::Config as BigCurveCongig;
+// use ark_bw6_761::Config as BigCurveCongig;
 use ark_bw6_761::FrConfig as FrConfig761;
 use ark_ec::{
     bls12,
-    bw6::{self, BW6Config},
+    bw6::{self, BW6Config, G1Affine},
 };
 use ark_ff::fields::{Fp384, MontBackend};
-pub type G1Affine = bw6::G1Affine<BigCurveCongig>;
+// pub type G1Affine = bw6::G1Affine<BigCurveCongig>;
 pub type G1Projective = bls12::G1Projective<Config377>;
 pub type Fr = Fp384<MontBackend<FrConfig761, 6>>;
 // Polynomial commitment to the vector of public keys.
@@ -39,15 +39,15 @@ pub type Fr = Fp384<MontBackend<FrConfig761, 6>>;
 // Verifier checks the signatures and can trust that the properties hold under some "2/3 honest validators" assumption.
 // As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct KeysetCommitment {
+pub struct KeysetCommitment<Config761: BW6Config> {
     // Per-coordinate KZG commitments to a vector of BLS public keys on BLS12-377 represented in affine.
-    pub pks_comm: (G1Affine, G1Affine),
+    pub pks_comm: (G1Affine<Config761>, G1Affine<Config761>),
     // Determines domain used to interpolate the vectors above.
     pub log_domain_size: u32,
 }
 
 #[derive(Clone)]
-pub struct Keyset {
+pub struct Keyset<Config761: BW6Config> {
     // Actual public keys, no padding.
     pub pks: Vec<G1Projective>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
@@ -59,7 +59,7 @@ pub struct Keyset {
     pub pks_evals_x4: Option<[Evaluations<Fr, Radix2EvaluationDomain<Fr>>; 2]>,
 }
 
-impl Keyset {
+impl<Config761: BW6Config> Keyset<Config761> {
     pub fn new(pks: Vec<G1Projective>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
         let domain = Radix2EvaluationDomain::<Fr>::new(min_domain_size).unwrap();
@@ -98,11 +98,14 @@ impl Keyset {
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
-    pub fn commit(&self, kzg_pk: &KzgCommitterKey<G1Affine>) -> KeysetCommitment {
+    pub fn commit(
+        &self,
+        kzg_pk: &KzgCommitterKey<G1Affine<Config761>>,
+    ) -> KeysetCommitment<Config761> {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
         let pks_x_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
         let pks_y_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
-        KeysetCommitment {
+        KeysetCommitment::<Config761> {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,
         }

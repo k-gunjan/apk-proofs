@@ -1,12 +1,11 @@
 use ark_bw6_761::BW6_761;
 use ark_ec::CurveGroup;
 use ark_poly::{EvaluationDomain, Polynomial};
-use fflonk::pcs::{PCS, PcsParams};
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::kzg::urs::URS;
+use fflonk::pcs::{PcsParams, PCS};
 use merlin::Transcript;
 
-use crate::{AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment, NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof};
 use crate::domains::Domains;
 use crate::keyset::Keyset;
 use crate::piop::basic::BasicRegisterBuilder;
@@ -15,6 +14,10 @@ use crate::piop::packed::PackedRegisterBuilder;
 use crate::piop::ProverProtocol;
 use crate::piop::RegisterPolynomials;
 use crate::transcript::ApkTranscript;
+use crate::{
+    AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment,
+    NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof,
+};
 
 pub struct Prover {
     domains: Domains,
@@ -23,9 +26,7 @@ pub struct Prover {
     preprocessed_transcript: Transcript,
 }
 
-
 impl Prover {
-
     pub fn new(
         mut keyset: Keyset,
         keyset_comm: &KeysetCommitment,
@@ -61,8 +62,13 @@ impl Prover {
         self.prove::<CountingScheme>(bitmask)
     }
 
-    fn prove<P: ProverProtocol>(&self, bitmask: Bitmask) -> (Proof<P::E, <P::P1 as RegisterPolynomials>::C, <P::P2 as RegisterPolynomials>::C>, P::PI)
-    {
+    fn prove<P: ProverProtocol>(
+        &self,
+        bitmask: Bitmask,
+    ) -> (
+        Proof<P::E, <P::P1 as RegisterPolynomials>::C, <P::P2 as RegisterPolynomials>::C>,
+        P::PI,
+    ) {
         assert_eq!(bitmask.size(), self.keyset.size());
         assert!(bitmask.count_ones() > 0); // as EC identity doesn't have and affine representation
 
@@ -75,9 +81,8 @@ impl Prover {
         // 1. Compute and commit to the basic registers.
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
         let partial_sums_polynomials = protocol.get_register_polynomials_to_commit1();
-        let partial_sums_commitments = partial_sums_polynomials.commit(
-            |p| NewKzgBw6::commit(&self.kzg_pk, &p).0
-        );
+        let partial_sums_commitments =
+            partial_sums_polynomials.commit(|p| NewKzgBw6::commit(&self.kzg_pk, &p).0);
 
         transcript.append_register_commitments(&partial_sums_commitments);
 
@@ -86,9 +91,8 @@ impl Prover {
         let r = transcript.get_bitmask_aggregation_challenge();
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
-        let acc_register_commitments = acc_register_polynomials.commit(
-            |p| NewKzgBw6::commit(&self.kzg_pk, &p).0
-        );
+        let acc_register_commitments =
+            acc_register_polynomials.commit(|p| NewKzgBw6::commit(&self.kzg_pk, &p).0);
         transcript.append_2nd_round_register_commitments(&acc_register_commitments);
 
         // 3. Receive constraint aggregation challenge,
