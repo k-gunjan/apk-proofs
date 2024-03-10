@@ -1,24 +1,23 @@
 use crate::domains::Domains;
+
+use crate::Config377;
+use crate::FrConfig761;
 use crate::{hash_to_curve, NewKzgBw6};
-use ark_ec::CurveGroup;
+use ark_ec::{
+    CurveGroup,
+    bls12,
+    bw6::{BW6Config, G1Affine},
+};
+use ark_ff::fields::{Fp384, MontBackend};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::marker::PhantomData;
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
-
-use ark_bls12_377::Config as Config377;
-use ark_bw6_761::Config as BigCurveCongig;
-use ark_bw6_761::FrConfig as FrConfig761;
-use ark_ec::{
-    bls12,
-    bw6::{self, BW6Config, G1Affine},
-};
-use ark_ff::fields::{Fp384, MontBackend};
-// pub type G1Affine = bw6::G1Affine<BigCurveCongig>;
 pub type G1Projective = bls12::G1Projective<Config377>;
 pub type Fr = Fp384<MontBackend<FrConfig761, 6>>;
+
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
 // domain_size := KeysetCommitment::domain.size and
@@ -38,7 +37,7 @@ pub type Fr = Fp384<MontBackend<FrConfig761, 6>>;
 // computes the commitment using the right parameters, and then sign it.
 // Verifier checks the signatures and can trust that the properties hold under some "2/3 honest validators" assumption.
 // As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
-#[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
+#[derive(Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct KeysetCommitment<Config761: BW6Config> {
     // Per-coordinate KZG commitments to a vector of BLS public keys on BLS12-377 represented in affine.
     pub pks_comm: (G1Affine<Config761>, G1Affine<Config761>),
@@ -46,7 +45,6 @@ pub struct KeysetCommitment<Config761: BW6Config> {
     pub log_domain_size: u32,
 }
 
-// #[derive(Clone)]
 pub struct Keyset<Config761: BW6Config> {
     // Actual public keys, no padding.
     pub pks: Vec<G1Projective>,
@@ -60,7 +58,7 @@ pub struct Keyset<Config761: BW6Config> {
     _marker: PhantomData<Config761>,
 }
 
-impl<Config761: BW6Config> Keyset<Config761> {
+impl<Config761: BW6Config<G1Config = ark_bw6_761::g1::Config>> Keyset<Config761> {
     pub fn new(pks: Vec<G1Projective>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
         let domain = Radix2EvaluationDomain::<Fr>::new(min_domain_size).unwrap();
@@ -132,6 +130,15 @@ impl<Config761: BW6Config> Clone for Keyset<Config761> {
             domain: self.domain.clone(),
             pks_evals_x4: self.pks_evals_x4.clone(),
             _marker: PhantomData,
+        }
+    }
+}
+
+impl<Config761: BW6Config> Clone for KeysetCommitment<Config761> {
+    fn clone(&self) -> Self {
+        KeysetCommitment {
+            pks_comm: self.pks_comm.clone(),
+            log_domain_size: self.log_domain_size,
         }
     }
 }
