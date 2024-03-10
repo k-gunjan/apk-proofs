@@ -18,7 +18,7 @@ use crate::{
     AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment,
     NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof,
 };
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 pub struct Prover {
     domains: Domains,
     keyset: Keyset<BigCurveCongig>,

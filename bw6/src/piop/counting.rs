@@ -13,7 +13,7 @@ use crate::piop::{
 };
 use crate::utils::LagrangeEvaluations;
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingCommitments {
     affine_addition_commitments: PartialSumsAndBitmaskCommitments,

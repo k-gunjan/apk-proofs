@@ -1,7 +1,7 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
 
 use ark_bls12_377::G1Affine;
-use ark_bw6_761::{Fr, BW6_761};
+use ark_bw6_761::Fr;
 use ark_ec::bw6::BW6;
 use ark_ec::CurveGroup;
 use ark_ff::MontFp;
@@ -18,10 +18,12 @@ use crate::piop::bitmask_packing::{
 };
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
-use ark_bw6_761::Config as BigCurveCongig;
-
+pub use ark_bw6_761::Config as BigCurveCongig;
+pub use ark_bw6_761::g1;
 pub use self::prover::*;
 pub use self::verifier::*;
+pub use ark_bls12_377::Config as Config377;
+pub use ark_bw6_761::FrConfig as FrConfig761;
 
 pub mod endo;
 mod prover;

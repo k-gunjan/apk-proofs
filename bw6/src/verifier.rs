@@ -25,7 +25,7 @@ use crate::{
     endo, utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment,
     NewKzgBw6, PackedProof, Proof, PublicInput, RegisterCommitments, SimpleProof,
 };
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 pub struct Verifier {
     domain: Radix2EvaluationDomain<Fr>,
     kzg_pvk: KzgVerifierKey<BW6_761>,

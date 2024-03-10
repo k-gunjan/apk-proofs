@@ -16,7 +16,7 @@ use crate::piop::{
 };
 use crate::utils::LagrangeEvaluations;
 use crate::{point_in_g1_complement, Keyset};
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct PartialSumsCommitments(pub ark_bw6_761::G1Affine, pub ark_bw6_761::G1Affine);
 

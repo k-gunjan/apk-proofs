@@ -8,7 +8,7 @@ use crate::piop::affine_addition::{
 };
 use crate::piop::{ProverProtocol, RegisterEvaluations};
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AffineAdditionEvaluationsWithoutBitmask {
     pub keyset: (Fr, Fr),

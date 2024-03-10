@@ -14,7 +14,7 @@ pub mod bitmask_packing;
 pub mod basic;
 pub mod counting;
 pub mod packed;
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 pub trait RegisterCommitments: CanonicalSerialize + CanonicalDeserialize {
     fn as_vec(&self) -> Vec<G1Affine>;
 }

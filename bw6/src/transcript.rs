@@ -7,7 +7,7 @@ use merlin::Transcript;
 
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
 use crate::{KeysetCommitment, PublicInput};
-use ark_bw6_761::Config as BigCurveCongig;
+use crate::BigCurveCongig;
 pub(crate) trait ApkTranscript {
     fn set_protocol_params(
         &mut self,
