@@ -4,7 +4,7 @@ use ark_poly::Radix2EvaluationDomain;
 use ark_serialize::CanonicalSerialize;
 use fflonk::pcs::kzg::params::RawKzgVerifierKey;
 use merlin::Transcript;
-
+use ark_ec::bw6::BW6;
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
 use crate::{KeysetCommitment, PublicInput};
 use crate::BigCurveCongig;
@@ -12,7 +12,7 @@ pub(crate) trait ApkTranscript {
     fn set_protocol_params(
         &mut self,
         domain: &Radix2EvaluationDomain<Fr>,
-        kzg_vk: &RawKzgVerifierKey<BW6_761>,
+        kzg_vk: &RawKzgVerifierKey<BW6<BigCurveCongig>>,
     ) {
         self._append_serializable(b"domain", domain);
         self._append_serializable(b"vk", kzg_vk);

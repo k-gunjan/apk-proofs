@@ -14,14 +14,15 @@ use crate::piop::{
 use crate::utils::LagrangeEvaluations;
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
 use crate::BigCurveCongig;
+use ark_ec::bw6::G1Affine;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingCommitments {
     affine_addition_commitments: PartialSumsAndBitmaskCommitments,
-    partial_counts_commitment: ark_bw6_761::G1Affine,
+    partial_counts_commitment: G1Affine<BigCurveCongig>,
 }
 
 impl RegisterCommitments for CountingCommitments {
-    fn as_vec(&self) -> Vec<ark_bw6_761::G1Affine> {
+    fn as_vec(&self) -> Vec<G1Affine<BigCurveCongig>> {
         let mut commitments = self.affine_addition_commitments.as_vec();
         commitments.push(self.partial_counts_commitment);
         commitments
@@ -36,7 +37,7 @@ pub struct CountingPolynomials {
 impl RegisterPolynomials for CountingPolynomials {
     type C = CountingCommitments;
 
-    fn commit<F: Clone + Fn(&DensePolynomial<Fr>) -> ark_bw6_761::G1Affine>(
+    fn commit<F: Clone + Fn(&DensePolynomial<Fr>) -> G1Affine<BigCurveCongig>>(
         &self,
         f: F,
     ) -> Self::C {

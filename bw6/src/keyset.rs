@@ -58,7 +58,7 @@ pub struct Keyset<Config761: BW6Config> {
     _marker: PhantomData<Config761>,
 }
 
-impl<Config761: BW6Config<G1Config = ark_bw6_761::g1::Config>> Keyset<Config761> {
+impl<Config761: BW6Config> Keyset<Config761> {
     pub fn new(pks: Vec<G1Projective>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
         let domain = Radix2EvaluationDomain::<Fr>::new(min_domain_size).unwrap();

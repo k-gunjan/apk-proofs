@@ -2,13 +2,14 @@ extern crate apk_proofs;
 
 use ark_bw6_761::Fr;
 use ark_ec::VariableBaseMSM;
-use ark_ec::{AffineRepr, CurveGroup};
+use ark_ec::{AffineRepr, CurveGroup, bw6::G1Affine};
 use ark_ff::{FftField, Field};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_std::{test_rng, UniformRand};
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use fflonk::pcs::PcsParams;
+use apk_proofs::BigCurveCongig;
 
 use apk_proofs::{setup, Keyset};
 
@@ -243,7 +244,7 @@ fn fft<F: FftField, D: EvaluationDomain<F>>(c: &mut Criterion) {
 }
 
 fn components(c: &mut Criterion) {
-    msm::<ark_bw6_761::G1Affine>(c, 6);
+    msm::<G1Affine<BigCurveCongig>>(c, 6);
     barycentric_evaluation::<ark_bw6_761::Fr>(c, 2u32.pow(10));
     bw6_subgroup_check(c);
     amplification(c);

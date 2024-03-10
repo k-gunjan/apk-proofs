@@ -1,5 +1,5 @@
-use ark_bw6_761::BW6_761;
-use ark_ec::CurveGroup;
+// use ark_bw6_761::BW6_761;
+use ark_ec::{CurveGroup, bw6::BW6};
 use ark_poly::{EvaluationDomain, Polynomial};
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::kzg::urs::URS;
@@ -22,7 +22,7 @@ use crate::BigCurveCongig;
 pub struct Prover {
     domains: Domains,
     keyset: Keyset<BigCurveCongig>,
-    kzg_pk: KzgCommitterKey<ark_bw6_761::G1Affine>,
+    kzg_pk: KzgCommitterKey<ark_ec::bw6::G1Affine<BigCurveCongig>>,
     preprocessed_transcript: Transcript,
 }
 
@@ -31,7 +31,7 @@ impl Prover {
         mut keyset: Keyset<BigCurveCongig>,
         keyset_comm: &KeysetCommitment<BigCurveCongig>,
         // prover needs both KZG pk and vk, as it commits to the latter to bind the srs
-        kzg_params: URS<BW6_761>,
+        kzg_params: URS<BW6<BigCurveCongig>>,
         mut empty_transcript: Transcript,
     ) -> Self {
         let domains = Domains::new(keyset.domain.size());

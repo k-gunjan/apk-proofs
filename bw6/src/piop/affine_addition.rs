@@ -1,8 +1,8 @@
 use std::iter;
 
 use ark_bls12_377::G1Projective;
-use ark_bw6_761::{Fr, G1Affine};
-use ark_ec::{AffineRepr, CurveGroup};
+use ark_bw6_761::{Fr};
+use ark_ec::{AffineRepr, CurveGroup, bw6::G1Affine};
 use ark_ff::{Field, One, Zero};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{
@@ -18,10 +18,10 @@ use crate::utils::LagrangeEvaluations;
 use crate::{point_in_g1_complement, Keyset};
 use crate::BigCurveCongig;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct PartialSumsCommitments(pub ark_bw6_761::G1Affine, pub ark_bw6_761::G1Affine);
+pub struct PartialSumsCommitments(pub G1Affine<BigCurveCongig>, pub G1Affine<BigCurveCongig>);
 
 impl RegisterCommitments for PartialSumsCommitments {
-    fn as_vec(&self) -> Vec<G1Affine> {
+    fn as_vec(&self) -> Vec<G1Affine<BigCurveCongig>> {
         vec![self.0, self.1]
     }
 }
@@ -31,7 +31,7 @@ pub type PartialSumsPolynomials = [DensePolynomial<Fr>; 2];
 impl RegisterPolynomials for PartialSumsPolynomials {
     type C = PartialSumsCommitments;
 
-    fn commit<F: Fn(&DensePolynomial<Fr>) -> G1Affine>(&self, f: F) -> PartialSumsCommitments {
+    fn commit<F: Fn(&DensePolynomial<Fr>) -> G1Affine<BigCurveCongig>>(&self, f: F) -> PartialSumsCommitments {
         PartialSumsCommitments(f(&self[0]), f(&self[1]))
     }
 }
@@ -41,11 +41,11 @@ impl RegisterPolynomials for PartialSumsPolynomials {
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct PartialSumsAndBitmaskCommitments {
     pub partial_sums: PartialSumsCommitments,
-    pub bitmask: ark_bw6_761::G1Affine,
+    pub bitmask: G1Affine<BigCurveCongig>,
 }
 
 impl RegisterCommitments for PartialSumsAndBitmaskCommitments {
-    fn as_vec(&self) -> Vec<G1Affine> {
+    fn as_vec(&self) -> Vec<G1Affine<BigCurveCongig>> {
         let mut res = vec![self.bitmask];
         res.extend(self.partial_sums.as_vec());
         res
@@ -60,7 +60,7 @@ pub struct PartialSumsAndBitmaskPolynomials {
 impl RegisterPolynomials for PartialSumsAndBitmaskPolynomials {
     type C = PartialSumsAndBitmaskCommitments;
 
-    fn commit<F: Clone + Fn(&DensePolynomial<Fr>) -> G1Affine>(
+    fn commit<F: Clone + Fn(&DensePolynomial<Fr>) -> G1Affine<BigCurveCongig>>(
         &self,
         f: F,
     ) -> PartialSumsAndBitmaskCommitments {

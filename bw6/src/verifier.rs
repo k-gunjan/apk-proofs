@@ -1,5 +1,5 @@
 use ark_bw6_761::{Fr, BW6_761};
-use ark_ec::{AffineRepr, CurveGroup};
+use ark_ec::{AffineRepr, CurveGroup, bw6::BW6};
 use ark_ff::{One, UniformRand};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_std::{end_timer, start_timer};
@@ -28,7 +28,7 @@ use crate::{
 use crate::BigCurveCongig;
 pub struct Verifier {
     domain: Radix2EvaluationDomain<Fr>,
-    kzg_pvk: KzgVerifierKey<BW6_761>,
+    kzg_pvk: KzgVerifierKey<BW6<BigCurveCongig>>,
     pks_comm: KeysetCommitment<BigCurveCongig>,
     preprocessed_transcript: Transcript,
 }
@@ -244,7 +244,7 @@ impl Verifier {
     }
 
     pub fn new(
-        kzg_vk: RawKzgVerifierKey<BW6_761>,
+        kzg_vk: RawKzgVerifierKey<BW6<BigCurveCongig>>,
         pks_comm: KeysetCommitment<BigCurveCongig>,
         mut empty_transcript: Transcript,
     ) -> Self {

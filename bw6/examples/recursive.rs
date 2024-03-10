@@ -18,7 +18,7 @@ use apk_proofs::{
     hash_to_curve, setup, AccountablePublicInput, Bitmask, Keyset, KeysetCommitment, Prover,
     SimpleProof, Verifier,
 };
-use apk_proofs::{BigCurveCongig};
+use apk_proofs::BigCurveCongig;
 
 // This example sketches the primary intended use case of the crate functionality:
 // building communication-efficient light clients for blockchains.
@@ -115,7 +115,7 @@ impl Validator {
     fn approve(
         &self,
         new_validator_set: &ValidatorSet,
-        kzg_pk: &KzgCommitterKey<ark_bw6_761::G1Affine>,
+        kzg_pk: &KzgCommitterKey<G1Affine<BigCurveCongig>>,
     ) -> Approval {
         // Computing the commitment to the new validator set is a time consuming operation.
         // In real-world deployments it is run by each validator, hence in parallel.
@@ -154,7 +154,7 @@ impl ValidatorSet {
 
     fn rotate<R: Rng>(
         &self,
-        kzg_pk: &KzgCommitterKey<ark_bw6_761::G1Affine>,
+        kzg_pk: &KzgCommitterKey<G1Affine<BigCurveCongig>>,
         rng: &mut R,
     ) -> (ValidatorSet, Vec<Approval>) {
         new_era();

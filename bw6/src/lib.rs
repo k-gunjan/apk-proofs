@@ -2,7 +2,7 @@
 
 use ark_bls12_377::G1Affine;
 use ark_bw6_761::Fr;
-use ark_ec::bw6::BW6;
+pub use ark_ec::bw6::{BW6Config, BW6, TwistType};
 use ark_ec::CurveGroup;
 use ark_ff::MontFp;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -18,8 +18,11 @@ use crate::piop::bitmask_packing::{
 };
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
-pub use ark_bw6_761::Config as BigCurveCongig;
-pub use ark_bw6_761::g1;
+// pub use ark_bw6_761::Config as BigCurveCongig;
+mod bw6_761_config;
+pub use bw6_761_config::Config as BigCurveCongig;
+
+use ark_ff::{biginteger::BigInteger768 as BigInteger, BigInt};
 pub use self::prover::*;
 pub use self::verifier::*;
 pub use ark_bls12_377::Config as Config377;
@@ -44,6 +47,7 @@ pub mod setup;
 pub mod test_helpers; //TODO: cfgtest
 
 type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
+
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones
@@ -89,14 +93,14 @@ pub struct Proof<E: RegisterEvaluations, C: RegisterCommitments, AC: RegisterCom
     // 2nd round commitments, used in "packed" scheme after get the bitmask aggregation challenge is received
     additional_commitments: AC,
     // Prover receives \phi, the constraint polynomials batching challenge, here
-    q_comm: ark_bw6_761::G1Affine,
+    q_comm: ark_ec::bw6::G1Affine<BigCurveCongig>,
     // Prover receives \zeta, the evaluation point challenge, here
     register_evaluations: E,
     q_zeta: Fr,
     r_zeta_omega: Fr,
     // Prover receives \nu, the KZG opening batching challenge, here
-    w_at_zeta_proof: ark_bw6_761::G1Affine,
-    r_at_zeta_omega_proof: ark_bw6_761::G1Affine,
+    w_at_zeta_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
+    r_at_zeta_omega_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
 }
 
 pub type SimpleProof = Proof<AffineAdditionEvaluationsWithoutBitmask, PartialSumsCommitments, ()>;

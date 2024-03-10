@@ -4,7 +4,7 @@ use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_poly::{Evaluations, Polynomial, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{end_timer, start_timer};
-
+use crate::BigCurveCongig;
 use crate::domains::Domains;
 use crate::piop::affine_addition::{AffineAdditionEvaluations, PartialSumsAndBitmaskCommitments};
 use crate::piop::{
@@ -12,21 +12,21 @@ use crate::piop::{
 };
 use crate::utils::LagrangeEvaluations;
 use crate::{utils, Bitmask};
-
+use  ark_ec::bw6::G1Affine;
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone)]
 pub struct BitmaskPackingCommitments {
-    pub c_comm: ark_bw6_761::G1Affine,
-    pub acc_comm: ark_bw6_761::G1Affine,
+    pub c_comm: G1Affine<BigCurveCongig>,
+    pub acc_comm: G1Affine<BigCurveCongig>,
 }
 
 impl BitmaskPackingCommitments {
-    pub fn new(c_comm: ark_bw6_761::G1Affine, acc_comm: ark_bw6_761::G1Affine) -> Self {
+    pub fn new(c_comm: G1Affine<BigCurveCongig>, acc_comm: G1Affine<BigCurveCongig>) -> Self {
         BitmaskPackingCommitments { c_comm, acc_comm }
     }
 }
 
 impl RegisterCommitments for BitmaskPackingCommitments {
-    fn as_vec(&self) -> Vec<ark_bw6_761::G1Affine> {
+    fn as_vec(&self) -> Vec<G1Affine<BigCurveCongig>> {
         vec![self.c_comm, self.acc_comm]
     }
 }
@@ -47,7 +47,7 @@ impl BitmaskPackingPolynomials {
 impl RegisterPolynomials for BitmaskPackingPolynomials {
     type C = BitmaskPackingCommitments;
 
-    fn commit<F: Fn(&DensePolynomial<Fr>) -> ark_bw6_761::G1Affine>(&self, f: F) -> Self::C {
+    fn commit<F: Fn(&DensePolynomial<Fr>) -> G1Affine<BigCurveCongig>>(&self, f: F) -> Self::C {
         BitmaskPackingCommitments::new(f(&self.c_poly), f(&self.acc_poly))
     }
 }
