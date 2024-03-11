@@ -18,9 +18,9 @@ use crate::piop::bitmask_packing::{
 };
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
-// pub use ark_bw6_761::Config as BigCurveCongig;
+pub use ark_bw6_761::Config as BigCurveCongig;
 mod bw6_761_config;
-pub use bw6_761_config::Config as BigCurveCongig;
+// pub use bw6_761_config::Config as BigCurveCongig;
 
 use ark_ff::{biginteger::BigInteger768 as BigInteger, BigInt};
 pub use self::prover::*;

@@ -8,7 +8,7 @@ use crate::piop::affine_addition::{
 };
 use crate::piop::{ProverProtocol, RegisterEvaluations};
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use crate::BigCurveCongig;
+use crate::{Config377, BigCurveCongig};
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AffineAdditionEvaluationsWithoutBitmask {
     pub keyset: (Fr, Fr),
@@ -37,7 +37,7 @@ impl ProverProtocol for BasicRegisterBuilder {
     type E = AffineAdditionEvaluationsWithoutBitmask;
     type PI = AccountablePublicInput;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig>) -> Self {
+    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig, Config377>) -> Self {
         BasicRegisterBuilder {
             registers: AffineAdditionRegisters::new(domains, keyset, &bitmask.to_bits()),
             register_evaluations: None,

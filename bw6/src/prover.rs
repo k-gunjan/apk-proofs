@@ -18,17 +18,17 @@ use crate::{
     AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment,
     NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof,
 };
-use crate::BigCurveCongig;
+use crate::{ Config377, BigCurveCongig};
 pub struct Prover {
     domains: Domains,
-    keyset: Keyset<BigCurveCongig>,
+    keyset: Keyset<BigCurveCongig, Config377>,
     kzg_pk: KzgCommitterKey<ark_ec::bw6::G1Affine<BigCurveCongig>>,
     preprocessed_transcript: Transcript,
 }
 
 impl Prover {
     pub fn new(
-        mut keyset: Keyset<BigCurveCongig>,
+        mut keyset: Keyset<BigCurveCongig, Config377>,
         keyset_comm: &KeysetCommitment<BigCurveCongig>,
         // prover needs both KZG pk and vk, as it commits to the latter to bind the srs
         kzg_params: URS<BW6<BigCurveCongig>>,

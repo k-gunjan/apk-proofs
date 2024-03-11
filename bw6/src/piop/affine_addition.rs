@@ -17,6 +17,7 @@ use crate::piop::{
 use crate::utils::LagrangeEvaluations;
 use crate::{point_in_g1_complement, Keyset};
 use crate::BigCurveCongig;
+use crate::Config377;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct PartialSumsCommitments(pub G1Affine<BigCurveCongig>, pub G1Affine<BigCurveCongig>);
 
@@ -190,7 +191,7 @@ pub struct AffineAdditionRegisters {
 }
 
 impl AffineAdditionRegisters {
-    pub fn new(domains: Domains, keyset: Keyset<BigCurveCongig>, bitmask: &[bool]) -> Self {
+    pub fn new(domains: Domains, keyset: Keyset<BigCurveCongig, Config377>, bitmask: &[bool]) -> Self {
         assert_eq!(bitmask.len(), keyset.size());
         let domain_size = keyset.domain.size();
 
@@ -225,7 +226,7 @@ impl AffineAdditionRegisters {
     fn new_unchecked(
         domains: Domains,
         bitmask: Vec<Fr>,
-        keyset: Keyset<BigCurveCongig>,
+        keyset: Keyset<BigCurveCongig, Config377>,
         apk_acc: [Vec<Fr>; 2],
     ) -> Self {
         let bitmask_polynomial = domains.interpolate(bitmask);
@@ -473,7 +474,7 @@ mod tests {
         let domains = Domains::new(n);
 
         let good_bitmask = _random_bits(m, 0.5, rng);
-        let mut keyset = Keyset::<BigCurveCongig>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<BigCurveCongig, Config377>::new(random_pks(m, rng));
         keyset.amplify();
         let registers =
             AffineAdditionRegisters::new(domains.clone(), keyset.clone(), &good_bitmask);
@@ -510,7 +511,7 @@ mod tests {
         let m = n - 1;
         let domains = Domains::new(n);
 
-        let mut keyset = Keyset::<BigCurveCongig>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<BigCurveCongig, Config377>::new(random_pks(m, rng));
         keyset.amplify();
         let registers =
             AffineAdditionRegisters::new(domains.clone(), keyset, &_random_bits(m, 0.5, rng));
@@ -533,7 +534,7 @@ mod tests {
 
         let bits = _random_bits(m, 0.5, rng);
 
-        let mut keyset = Keyset::<BigCurveCongig>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<BigCurveCongig, Config377>::new(random_pks(m, rng));
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(domains.clone(), keyset.clone(), &bits);
         let constraint_polys =

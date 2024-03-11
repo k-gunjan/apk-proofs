@@ -1,6 +1,8 @@
 use crate::domains::Domains;
 // ark_bw6_761::G1Affine;
-use crate::Config377;
+
+use ark_ec::bls12::Bls12Config;
+// use crate::Config377;
 // use crate::FrConfig761;
 use crate::{hash_to_curve, NewKzgBw6};
 use ark_ec::{
@@ -12,10 +14,11 @@ use ark_ff::fields::{Fp384, MontBackend};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::marker::PhantomData;
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
-pub type G1Projective<C> = bls12::G1Projective<C>;
+// pub type G1Projective<C> = bls12::G1Projective<C>;
+use ark_ec::short_weierstrass::Projective;
+pub type G1Projective<P> = Projective<<P as Bls12Config>::G1Config>;
 pub type Fr<F> = Fp384<MontBackend<F, 6>>;
 use ark_ec::CurveConfig;
 type ScalarField<C> = <<C as BW6Config>::G1Config as CurveConfig>::ScalarField;
@@ -46,10 +49,9 @@ pub struct KeysetCommitment<Config761: BW6Config> {
     // Determines domain used to interpolate the vectors above.
     pub log_domain_size: u32,
 }
-
-pub struct Keyset<Config761: BW6Config> {
+pub struct Keyset<Config761: BW6Config, CongigBls12: Bls12Config> {
     // Actual public keys, no padding.
-    pub pks: Vec<G1Projective<Config377>>,
+    pub pks: Vec<G1Projective<CongigBls12>>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
     pub pks_polys: [DensePolynomial<ScalarField<Config761>>; 2],
     // Domain used to compute the interpolations above.
@@ -57,21 +59,20 @@ pub struct Keyset<Config761: BW6Config> {
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
     pub pks_evals_x4: Option<[Evaluations<ScalarField<Config761>, Radix2EvaluationDomain<ScalarField<Config761>>>; 2]>,
-    _marker: PhantomData<Config761>,
 }
 
-impl<Config761: BW6Config> Keyset<Config761> {
-    pub fn new(pks: Vec<G1Projective<Config377>>) -> Self {
+impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBls12> {
+    pub fn new(pks: Vec<G1Projective<CongigBls12>>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
         let domain = Radix2EvaluationDomain::<ScalarField<Config761>>::new(min_domain_size).unwrap();
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
-        let padding_pk = hash_to_curve::<G1Projective<Config377>>(b"apk-proofs");
+        let padding_pk = hash_to_curve::<G1Projective<CongigBls12>>(b"apk-proofs");
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
-        let (pks_x, pks_y) = G1Projective::<Config377>::normalize_batch(&padded_pks)
+        let (pks_x, pks_y) = G1Projective::<CongigBls12>::normalize_batch(&padded_pks)
             .iter()
             .map(|p| (p.x, p.y))
             .unzip();
@@ -82,7 +83,6 @@ impl<Config761: BW6Config> Keyset<Config761> {
             domain,
             pks_polys: [pks_x_poly, pks_y_poly],
             pks_evals_x4: None,
-            _marker: Default::default(),
         }
     }
 
@@ -113,7 +113,7 @@ impl<Config761: BW6Config> Keyset<Config761> {
         }
     }
 
-    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective<Config377> {
+    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective<CongigBls12> {
         assert_eq!(bitmask.len(), self.size());
         bitmask
             .iter()
@@ -124,14 +124,13 @@ impl<Config761: BW6Config> Keyset<Config761> {
     }
 }
 
-impl<Config761: BW6Config> Clone for Keyset<Config761> {
+impl<Config761: BW6Config,  CongigBls12: Bls12Config> Clone for Keyset<Config761, CongigBls12> {
     fn clone(&self) -> Self {
         Keyset {
             pks: self.pks.clone(),
             pks_polys: self.pks_polys.clone(),
             domain: self.domain.clone(),
             pks_evals_x4: self.pks_evals_x4.clone(),
-            _marker: PhantomData,
         }
     }
 }
