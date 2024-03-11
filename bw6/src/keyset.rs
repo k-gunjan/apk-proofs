@@ -1,7 +1,7 @@
 use crate::domains::Domains;
-
+// ark_bw6_761::G1Affine;
 use crate::Config377;
-use crate::FrConfig761;
+// use crate::FrConfig761;
 use crate::{hash_to_curve, NewKzgBw6};
 use ark_ec::{
     CurveGroup,
@@ -15,8 +15,10 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::marker::PhantomData;
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
-pub type G1Projective = bls12::G1Projective<Config377>;
-pub type Fr = Fp384<MontBackend<FrConfig761, 6>>;
+pub type G1Projective<C> = bls12::G1Projective<C>;
+pub type Fr<F> = Fp384<MontBackend<F, 6>>;
+use ark_ec::CurveConfig;
+type ScalarField<C> = <<C as BW6Config>::G1Config as CurveConfig>::ScalarField;
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -47,29 +49,29 @@ pub struct KeysetCommitment<Config761: BW6Config> {
 
 pub struct Keyset<Config761: BW6Config> {
     // Actual public keys, no padding.
-    pub pks: Vec<G1Projective>,
+    pub pks: Vec<G1Projective<Config377>>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
-    pub pks_polys: [DensePolynomial<Fr>; 2],
+    pub pks_polys: [DensePolynomial<ScalarField<Config761>>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<Fr>,
+    pub domain: Radix2EvaluationDomain<ScalarField<Config761>>,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
-    pub pks_evals_x4: Option<[Evaluations<Fr, Radix2EvaluationDomain<Fr>>; 2]>,
+    pub pks_evals_x4: Option<[Evaluations<ScalarField<Config761>, Radix2EvaluationDomain<ScalarField<Config761>>>; 2]>,
     _marker: PhantomData<Config761>,
 }
 
 impl<Config761: BW6Config> Keyset<Config761> {
-    pub fn new(pks: Vec<G1Projective>) -> Self {
+    pub fn new(pks: Vec<G1Projective<Config377>>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain = Radix2EvaluationDomain::<Fr>::new(min_domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<ScalarField<Config761>>::new(min_domain_size).unwrap();
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
-        let padding_pk = hash_to_curve::<G1Projective>(b"apk-proofs");
+        let padding_pk = hash_to_curve::<G1Projective<Config377>>(b"apk-proofs");
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
-        let (pks_x, pks_y) = G1Projective::normalize_batch(&padded_pks)
+        let (pks_x, pks_y) = G1Projective::<Config377>::normalize_batch(&padded_pks)
             .iter()
             .map(|p| (p.x, p.y))
             .unzip();
@@ -103,15 +105,15 @@ impl<Config761: BW6Config> Keyset<Config761> {
         kzg_pk: &KzgCommitterKey<G1Affine<Config761>>,
     ) -> KeysetCommitment<Config761> {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
-        let pks_x_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
-        let pks_y_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
+        let pks_x_comm = NewKzgBw6::<Config761>::commit(kzg_pk, &self.pks_polys[0]).0;
+        let pks_y_comm = NewKzgBw6::<Config761>::commit(kzg_pk, &self.pks_polys[1]).0;
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,
         }
     }
 
-    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective {
+    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective<Config377> {
         assert_eq!(bitmask.len(), self.size());
         bitmask
             .iter()

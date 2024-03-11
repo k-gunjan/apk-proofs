@@ -211,7 +211,7 @@ mod tests {
         let n = 16;
         let m = n - 1;
 
-        let kzg_params = NewKzgBw6::setup(m, rng);
+        let kzg_params = NewKzgBw6::<BigCurveCongig>::setup(m, rng);
         let mut keyset = Keyset::<BigCurveCongig>::new(random_pks(m, rng));
         keyset.amplify();
         let mut scheme = CountingScheme::init(
@@ -224,7 +224,7 @@ mod tests {
 
         let actual_commitments = scheme
             .get_register_polynomials_to_commit1()
-            .commit(|p| NewKzgBw6::commit(&kzg_params.ck(), &p).0)
+            .commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&kzg_params.ck(), &p).0)
             .as_vec();
         let actual_evaluations = scheme.evaluate_register_polynomials(zeta).as_vec();
         let polynomials = scheme.get_register_polynomials_to_open();
@@ -238,7 +238,7 @@ mod tests {
         let expected_commitments = polynomials
             .iter()
             .skip(2) // keyset commitment is publicly known
-            .map(|p| NewKzgBw6::commit(&kzg_params.ck(), &p).0)
+            .map(|p| NewKzgBw6::<BigCurveCongig>::commit(&kzg_params.ck(), &p).0)
             .collect::<Vec<_>>();
         assert_eq!(actual_commitments, expected_commitments);
     }

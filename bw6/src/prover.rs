@@ -82,7 +82,7 @@ impl Prover {
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
         let partial_sums_polynomials = protocol.get_register_polynomials_to_commit1();
         let partial_sums_commitments =
-            partial_sums_polynomials.commit(|p| NewKzgBw6::commit(&self.kzg_pk, &p).0);
+            partial_sums_polynomials.commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &p).0);
 
         transcript.append_register_commitments(&partial_sums_commitments);
 
@@ -92,14 +92,14 @@ impl Prover {
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
         let acc_register_commitments =
-            acc_register_polynomials.commit(|p| NewKzgBw6::commit(&self.kzg_pk, &p).0);
+            acc_register_polynomials.commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &p).0);
         transcript.append_2nd_round_register_commitments(&acc_register_commitments);
 
         // 3. Receive constraint aggregation challenge,
         // compute and commit to the quotient polynomial.
         let phi = transcript.get_constraints_aggregation_challenge();
         let q_poly = protocol.compute_quotient_polynomial(phi, self.keyset.domain);
-        let q_comm = NewKzgBw6::commit(&self.kzg_pk, &q_poly).0;
+        let q_comm = NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &q_poly).0;
         transcript.append_quotient_commitment(&q_comm);
 
         // 4. Receive the evaluation point,
@@ -122,8 +122,8 @@ impl Prover {
         register_polynomials.push(q_poly);
         let nus = transcript.get_kzg_aggregation_challenges(register_polynomials.len());
         let w_poly = fflonk::aggregation::single::aggregate_polys(&register_polynomials, &nus);
-        let w_at_zeta_proof = NewKzgBw6::open(&self.kzg_pk, &w_poly, zeta);
-        let r_at_zeta_omega_proof = NewKzgBw6::open(&self.kzg_pk, &r_poly, zeta_omega);
+        let w_at_zeta_proof = NewKzgBw6::<BigCurveCongig>::open(&self.kzg_pk, &w_poly, zeta);
+        let r_at_zeta_omega_proof = NewKzgBw6::<BigCurveCongig>::open(&self.kzg_pk, &r_poly, zeta_omega);
 
         // Finally, compose the proof.
         let proof = Proof {

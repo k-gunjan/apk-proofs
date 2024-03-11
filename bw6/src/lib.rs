@@ -46,7 +46,8 @@ mod keyset;
 pub mod setup;
 pub mod test_helpers; //TODO: cfgtest
 
-type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
+// type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
+type NewKzgBw6<Config> = KZG<BW6<Config>>;
 
 
 // TODO: 1. From trait?
