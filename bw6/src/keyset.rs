@@ -1,27 +1,19 @@
+use std::marker::PhantomData;
 use crate::domains::Domains;
-// ark_bw6_761::G1Affine;
-
 use ark_ec::bls12::Bls12Config;
-// use crate::Config377;
-// use crate::FrConfig761;
 use crate::{hash_to_curve, NewKzgBw6};
 use ark_ec::{
     CurveGroup,
-    bls12,
     bw6::{BW6Config, G1Affine},
 };
-use ark_ff::fields::{Fp384, MontBackend};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
-// pub type G1Projective<C> = bls12::G1Projective<C>;
 use ark_ec::short_weierstrass::Projective;
 pub type G1Projective<P> = Projective<<P as Bls12Config>::G1Config>;
-pub type Fr<F> = Fp384<MontBackend<F, 6>>;
-use ark_ec::CurveConfig;
-type ScalarField<C> = <<C as BW6Config>::G1Config as CurveConfig>::ScalarField;
+pub type Fr<F> = <F as Bls12Config>::Fp;
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -53,18 +45,19 @@ pub struct Keyset<Config761: BW6Config, CongigBls12: Bls12Config> {
     // Actual public keys, no padding.
     pub pks: Vec<G1Projective<CongigBls12>>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
-    pub pks_polys: [DensePolynomial<ScalarField<Config761>>; 2],
+    pub pks_polys: [DensePolynomial<Fr<CongigBls12>>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<ScalarField<Config761>>,
+    pub domain: Radix2EvaluationDomain<Fr<CongigBls12>>,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
-    pub pks_evals_x4: Option<[Evaluations<ScalarField<Config761>, Radix2EvaluationDomain<ScalarField<Config761>>>; 2]>,
+    pub pks_evals_x4: Option<[Evaluations<Fr<CongigBls12>, Radix2EvaluationDomain<Fr<CongigBls12>>>; 2]>,
+    _marker : PhantomData<Config761>
 }
 
-impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBls12> {
+impl<Config761: BW6Config, CongigBls12: Bls12Config<Fp = ark_ff::Fp<MontBackend<ark_bls12_377::FqConfig, 6>, 6>> > Keyset<Config761, CongigBls12> {
     pub fn new(pks: Vec<G1Projective<CongigBls12>>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain = Radix2EvaluationDomain::<ScalarField<Config761>>::new(min_domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<Fr<CongigBls12>>::new(min_domain_size).unwrap();
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
@@ -83,6 +76,7 @@ impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBl
             domain,
             pks_polys: [pks_x_poly, pks_y_poly],
             pks_evals_x4: None,
+            _marker: Default::default()
         }
     }
 
@@ -131,6 +125,7 @@ impl<Config761: BW6Config,  CongigBls12: Bls12Config> Clone for Keyset<Config761
             pks_polys: self.pks_polys.clone(),
             domain: self.domain.clone(),
             pks_evals_x4: self.pks_evals_x4.clone(),
+            _marker: Default::default()
         }
     }
 }
