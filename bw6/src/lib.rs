@@ -1,9 +1,10 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
 
 use ark_bls12_377::G1Affine;
-use ark_bw6_761::Fr;
+// use ark_bw6_761::Fr;
 pub use ark_ec::bw6::{BW6Config, BW6, TwistType};
 use ark_ec::CurveGroup;
+use ark_ec::bls12::Bls12Config;
 use ark_ff::MontFp;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::kzg::KZG;
@@ -48,7 +49,7 @@ pub mod test_helpers; //TODO: cfgtest
 
 // type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
 type NewKzgBw6<Config> = KZG<BW6<Config>>;
-
+pub type Fr<F> = <F as Bls12Config>::Fp;
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones
@@ -97,8 +98,8 @@ pub struct Proof<E: RegisterEvaluations, C: RegisterCommitments, AC: RegisterCom
     q_comm: ark_ec::bw6::G1Affine<BigCurveCongig>,
     // Prover receives \zeta, the evaluation point challenge, here
     register_evaluations: E,
-    q_zeta: Fr,
-    r_zeta_omega: Fr,
+    q_zeta: Fr<Config377>,
+    r_zeta_omega: Fr<Config377>,
     // Prover receives \nu, the KZG opening batching challenge, here
     w_at_zeta_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
     r_at_zeta_omega_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
@@ -112,8 +113,8 @@ pub type PackedProof = Proof<
 >;
 pub type CountingProof = Proof<CountingEvaluations, CountingCommitments, ()>;
 
-const H_X: Fr = MontFp!("0");
-const H_Y: Fr = MontFp!("1");
+const H_X: Fr<Config377> = MontFp!("0");
+const H_Y: Fr<Config377> = MontFp!("1");
 fn point_in_g1_complement() -> ark_bls12_377::G1Affine {
     ark_bls12_377::G1Affine::new_unchecked(H_X, H_Y)
 }

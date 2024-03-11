@@ -13,7 +13,7 @@ use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
 use ark_ec::short_weierstrass::Projective;
 pub type G1Projective<P> = Projective<<P as Bls12Config>::G1Config>;
-pub type Fr<F> = <F as Bls12Config>::Fp;
+use crate::Fr;
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -54,7 +54,7 @@ pub struct Keyset<Config761: BW6Config, CongigBls12: Bls12Config> {
     _marker : PhantomData<Config761>
 }
 
-impl<Config761: BW6Config, CongigBls12: Bls12Config<Fp = ark_ff::Fp<MontBackend<ark_bls12_377::FqConfig, 6>, 6>> > Keyset<Config761, CongigBls12> {
+impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBls12> {
     pub fn new(pks: Vec<G1Projective<CongigBls12>>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
         let domain = Radix2EvaluationDomain::<Fr<CongigBls12>>::new(min_domain_size).unwrap();
