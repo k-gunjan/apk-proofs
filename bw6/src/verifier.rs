@@ -1,5 +1,5 @@
-use ark_bw6_761::{Fr, BW6_761};
-use ark_ec::{AffineRepr, CurveGroup, bw6::BW6};
+use ark_bw6_761::Fr;
+use ark_ec::{bw6::BW6, AffineRepr, CurveGroup};
 use ark_ff::{One, UniformRand};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_std::{end_timer, start_timer};
@@ -25,7 +25,7 @@ use crate::{
     endo, utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment,
     NewKzgBw6, PackedProof, Proof, PublicInput, RegisterCommitments, SimpleProof,
 };
-use crate::BigCurveCongig;
+use crate::{BigCurveCongig, Config377};
 pub struct Verifier {
     domain: Radix2EvaluationDomain<Fr>,
     kzg_pvk: KzgVerifierKey<BW6<BigCurveCongig>>,
@@ -43,7 +43,7 @@ struct Challenges {
 impl Verifier {
     pub fn verify_simple(
         &self,
-        public_input: &AccountablePublicInput,
+        public_input: &AccountablePublicInput<Config377>,
         proof: &SimpleProof,
     ) -> bool {
         let (challenges, mut fsrng) = self.restore_challenges(
@@ -80,7 +80,7 @@ impl Verifier {
 
     pub fn verify_packed(
         &self,
-        public_input: &AccountablePublicInput,
+        public_input: &AccountablePublicInput<Config377>,
         proof: &PackedProof,
     ) -> bool {
         let (challenges, mut fsrng) = self.restore_challenges(
@@ -112,7 +112,7 @@ impl Verifier {
 
     pub fn verify_counting(
         &self,
-        public_input: &CountingPublicInput,
+        public_input: &CountingPublicInput<Config377>,
         proof: &CountingProof,
     ) -> bool {
         assert!(public_input.count > 0);

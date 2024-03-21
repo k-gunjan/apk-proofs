@@ -1,5 +1,4 @@
-use ark_bw6_761::Fr;
-use ark_poly::polynomial::univariate::DensePolynomial;
+use std::marker::PhantomData;
 
 use crate::domains::Domains;
 use crate::piop::affine_addition::{AffineAdditionRegisters, PartialSumsAndBitmaskPolynomials};
@@ -8,21 +7,29 @@ use crate::piop::bitmask_packing::{
 };
 use crate::piop::ProverProtocol;
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use crate::{Config377, BigCurveCongig};
-pub struct PackedRegisterBuilder {
+use crate::{BigCurveCongig, Config377};
+use ark_bw6_761::Fr;
+use ark_ec::bls12::Bls12Config;
+use ark_poly::polynomial::univariate::DensePolynomial;
+pub struct PackedRegisterBuilder<ConfigBls12: Bls12Config> {
     bitmask: Bitmask,
     affine_addition_registers: AffineAdditionRegisters,
     bitmask_packing_registers: Option<BitmaskPackingRegisters>,
     register_evaluations: Option<SuccinctAccountableRegisterEvaluations>,
+    _marker: PhantomData<ConfigBls12>,
 }
 
-impl ProverProtocol for PackedRegisterBuilder {
+impl<ConfigBls12: Bls12Config> ProverProtocol for PackedRegisterBuilder<ConfigBls12> {
     type P1 = PartialSumsAndBitmaskPolynomials;
     type P2 = BitmaskPackingPolynomials;
     type E = SuccinctAccountableRegisterEvaluations;
-    type PI = AccountablePublicInput;
+    type PI = AccountablePublicInput<ConfigBls12>;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig, Config377>) -> Self {
+    fn init(
+        domains: Domains<Config377>,
+        bitmask: Bitmask,
+        keyset: Keyset<BigCurveCongig, Config377>,
+    ) -> Self {
         PackedRegisterBuilder {
             bitmask: bitmask.clone(),
             affine_addition_registers: AffineAdditionRegisters::new(

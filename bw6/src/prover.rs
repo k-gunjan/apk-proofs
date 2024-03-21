@@ -1,5 +1,5 @@
 // use ark_bw6_761::BW6_761;
-use ark_ec::{CurveGroup, bw6::BW6};
+use ark_ec::{bw6::BW6, CurveGroup};
 use ark_poly::{EvaluationDomain, Polynomial};
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::kzg::urs::URS;
@@ -18,9 +18,9 @@ use crate::{
     AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment,
     NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof,
 };
-use crate::{ Config377, BigCurveCongig};
+use crate::{BigCurveCongig, Config377};
 pub struct Prover {
-    domains: Domains,
+    domains: Domains<Config377>,
     keyset: Keyset<BigCurveCongig, Config377>,
     kzg_pk: KzgCommitterKey<ark_ec::bw6::G1Affine<BigCurveCongig>>,
     preprocessed_transcript: Transcript,
@@ -34,7 +34,7 @@ impl Prover {
         kzg_params: URS<BW6<BigCurveCongig>>,
         mut empty_transcript: Transcript,
     ) -> Self {
-        let domains = Domains::new(keyset.domain.size());
+        let domains = Domains::<Config377>::new(keyset.domain.size());
 
         // assert!(kzg_params.fits(keyset.domain.size())); // SRS contains enough elements
         empty_transcript.set_protocol_params(&keyset.domain, &kzg_params.raw_vk());
@@ -50,16 +50,25 @@ impl Prover {
         }
     }
 
-    pub fn prove_simple(&self, bitmask: Bitmask) -> (SimpleProof, AccountablePublicInput) {
-        self.prove::<BasicRegisterBuilder>(bitmask)
+    pub fn prove_simple(
+        &self,
+        bitmask: Bitmask,
+    ) -> (SimpleProof, AccountablePublicInput<Config377>) {
+        self.prove::<BasicRegisterBuilder<Config377>>(bitmask)
     }
 
-    pub fn prove_packed(&self, bitmask: Bitmask) -> (PackedProof, AccountablePublicInput) {
-        self.prove::<PackedRegisterBuilder>(bitmask)
+    pub fn prove_packed(
+        &self,
+        bitmask: Bitmask,
+    ) -> (PackedProof, AccountablePublicInput<Config377>) {
+        self.prove::<PackedRegisterBuilder<Config377>>(bitmask)
     }
 
-    pub fn prove_counting(&self, bitmask: Bitmask) -> (CountingProof, CountingPublicInput) {
-        self.prove::<CountingScheme>(bitmask)
+    pub fn prove_counting(
+        &self,
+        bitmask: Bitmask,
+    ) -> (CountingProof, CountingPublicInput<Config377>) {
+        self.prove::<CountingScheme<Config377>>(bitmask)
     }
 
     fn prove<P: ProverProtocol>(
@@ -81,8 +90,8 @@ impl Prover {
         // 1. Compute and commit to the basic registers.
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
         let partial_sums_polynomials = protocol.get_register_polynomials_to_commit1();
-        let partial_sums_commitments =
-            partial_sums_polynomials.commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &p).0);
+        let partial_sums_commitments = partial_sums_polynomials
+            .commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &p).0);
 
         transcript.append_register_commitments(&partial_sums_commitments);
 
@@ -91,8 +100,8 @@ impl Prover {
         let r = transcript.get_bitmask_aggregation_challenge();
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
-        let acc_register_commitments =
-            acc_register_polynomials.commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &p).0);
+        let acc_register_commitments = acc_register_polynomials
+            .commit(|p| NewKzgBw6::<BigCurveCongig>::commit(&self.kzg_pk, &p).0);
         transcript.append_2nd_round_register_commitments(&acc_register_commitments);
 
         // 3. Receive constraint aggregation challenge,
@@ -123,7 +132,8 @@ impl Prover {
         let nus = transcript.get_kzg_aggregation_challenges(register_polynomials.len());
         let w_poly = fflonk::aggregation::single::aggregate_polys(&register_polynomials, &nus);
         let w_at_zeta_proof = NewKzgBw6::<BigCurveCongig>::open(&self.kzg_pk, &w_poly, zeta);
-        let r_at_zeta_omega_proof = NewKzgBw6::<BigCurveCongig>::open(&self.kzg_pk, &r_poly, zeta_omega);
+        let r_at_zeta_omega_proof =
+            NewKzgBw6::<BigCurveCongig>::open(&self.kzg_pk, &r_poly, zeta_omega);
 
         // Finally, compose the proof.
         let proof = Proof {

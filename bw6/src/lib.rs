@@ -1,11 +1,13 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
 
-use ark_bls12_377::G1Affine;
-// use ark_bw6_761::Fr;
-pub use ark_ec::bw6::{BW6Config, BW6, TwistType};
-use ark_ec::CurveGroup;
+// use ark_bls12_377::G1Affine;
 use ark_ec::bls12::Bls12Config;
-use ark_ff::MontFp;
+use ark_ec::bls12::G1Affine;
+pub use ark_ec::bw6::{BW6Config, TwistType, BW6};
+use ark_ec::short_weierstrass::Projective;
+use ark_ec::CurveConfig;
+use ark_ec::CurveGroup;
+
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::kzg::KZG;
 
@@ -23,11 +25,11 @@ pub use ark_bw6_761::Config as BigCurveCongig;
 mod bw6_761_config;
 // pub use bw6_761_config::Config as BigCurveCongig;
 
-use ark_ff::{biginteger::BigInteger768 as BigInteger, BigInt};
 pub use self::prover::*;
 pub use self::verifier::*;
 pub use ark_bls12_377::Config as Config377;
 pub use ark_bw6_761::FrConfig as FrConfig761;
+use ark_ff::{biginteger::BigInteger768 as BigInteger, BigInt};
 
 pub mod endo;
 mod prover;
@@ -49,23 +51,26 @@ pub mod test_helpers; //TODO: cfgtest
 
 // type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
 type NewKzgBw6<Config> = KZG<BW6<Config>>;
-pub type Fr<F> = <F as Bls12Config>::Fp;
+pub type Fr<F> = <<F as Bls12Config>::G1Config as CurveConfig>::ScalarField;
+pub type G1Projective<P> = Projective<<P as Bls12Config>::G1Config>;
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones
 pub trait PublicInput: CanonicalSerialize + CanonicalDeserialize {
-    fn new(apk: &G1Affine, bitmask: &Bitmask) -> Self;
+    type Config: Bls12Config;
+    fn new(apk: &G1Affine<Self::Config>, bitmask: &Bitmask) -> Self;
 }
 
 // Used in 'basic' and 'packed' schemes
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct AccountablePublicInput {
-    pub apk: G1Affine,
+pub struct AccountablePublicInput<ConfigBls12: Bls12Config> {
+    pub apk: G1Affine<ConfigBls12>,
     pub bitmask: Bitmask,
 }
 
-impl PublicInput for AccountablePublicInput {
-    fn new(apk: &G1Affine, bitmask: &Bitmask) -> Self {
+impl<ConfigBls12: Bls12Config> PublicInput for AccountablePublicInput<ConfigBls12> {
+    type Config = ConfigBls12;
+    fn new(apk: &G1Affine<Self::Config>, bitmask: &Bitmask) -> Self {
         AccountablePublicInput {
             apk: apk.clone(),
             bitmask: bitmask.clone(),
@@ -75,13 +80,14 @@ impl PublicInput for AccountablePublicInput {
 
 // Used in 'counting' scheme
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct CountingPublicInput {
-    pub apk: G1Affine,
+pub struct CountingPublicInput<ConfigBls12: Bls12Config> {
+    pub apk: G1Affine<ConfigBls12>,
     pub count: usize,
 }
 
-impl PublicInput for CountingPublicInput {
-    fn new(apk: &G1Affine, bitmask: &Bitmask) -> Self {
+impl<ConfigBls12: Bls12Config> PublicInput for CountingPublicInput<ConfigBls12> {
+    type Config = ConfigBls12;
+    fn new(apk: &G1Affine<Self::Config>, bitmask: &Bitmask) -> Self {
         CountingPublicInput {
             apk: apk.clone(),
             count: bitmask.count_ones(),
@@ -113,10 +119,13 @@ pub type PackedProof = Proof<
 >;
 pub type CountingProof = Proof<CountingEvaluations, CountingCommitments, ()>;
 
-const H_X: Fr<Config377> = MontFp!("0");
-const H_Y: Fr<Config377> = MontFp!("1");
-fn point_in_g1_complement() -> ark_bls12_377::G1Affine {
-    ark_bls12_377::G1Affine::new_unchecked(H_X, H_Y)
+use ark_std::One;
+use ark_std::Zero;
+fn point_in_g1_complement<C: Bls12Config>() -> G1Affine<C> {
+    G1Affine::<C>::new_unchecked(
+        <C as Bls12Config>::Fp::zero(),
+        <C as Bls12Config>::Fp::one(),
+    )
 }
 
 // TODO: switch to better hash to curve when available
@@ -137,7 +146,7 @@ mod tests {
 
     #[test]
     fn h_is_not_in_g1() {
-        let h = point_in_g1_complement();
+        let h = point_in_g1_complement::<Config377>();
         assert!(h.is_on_curve());
         assert!(!h.is_in_correct_subgroup_assuming_on_curve());
     }

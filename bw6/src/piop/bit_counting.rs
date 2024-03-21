@@ -1,4 +1,5 @@
-use ark_bw6_761::Fr;
+use crate::{Fr as FrG, Config377};
+type Fr = FrG<Config377>;
 use ark_ff::{One, Zero};
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{Evaluations, Polynomial};
@@ -29,20 +30,20 @@ use crate::Bitmask;
 // But we use the former check not to handle this case differently.
 
 pub(crate) struct BitCountingRegisters {
-    domains: Domains,
+    domains: Domains<Config377>,
     bitmask: Vec<Fr>,
     partial_counts: DensePolynomial<Fr>,
 }
 
 impl BitCountingRegisters {
-    pub fn new(domains: Domains, bitmask: &Bitmask) -> Self {
+    pub fn new(domains: Domains<Config377>, bitmask: &Bitmask) -> Self {
         let mut bitmask = bitmask.to_bits_as_field_elements();
         bitmask.resize_with(domains.size, || Fr::zero());
         let partial_counts = Self::build_partial_counts_register(&bitmask);
         Self::new_unchecked(domains, bitmask, partial_counts)
     }
 
-    fn new_unchecked(domains: Domains, bitmask: Vec<Fr>, partial_counts: Vec<Fr>) -> Self {
+    fn new_unchecked(domains: Domains<Config377>, bitmask: Vec<Fr>, partial_counts: Vec<Fr>) -> Self {
         let partial_counts =
             Evaluations::from_vec_and_domain(partial_counts, domains.domain.clone()).interpolate();
         Self {
@@ -202,7 +203,7 @@ mod tests {
     fn test_bit_counting_constraint() {
         let rng = &mut test_rng();
         let n = 16;
-        let domains = Domains::new(n);
+        let domains = Domains::<Config377>::new(n);
 
         let bitmask = Bitmask::from_bits(&_random_bits(n, 2.0 / 3.0, rng));
         let count = Fr::from(bitmask.count_ones() as u32);
@@ -236,7 +237,7 @@ mod tests {
     fn test_bitmask_ends_with_zero_constraint() {
         let rng = &mut test_rng();
         let n = 16;
-        let domains = Domains::new(n);
+        let domains = Domains::<Config377>::new(n);
         let domain = domains.domain;
 
         let bits = _random_bits(n, 2.0 / 3.0, rng);

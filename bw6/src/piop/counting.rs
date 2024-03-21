@@ -1,7 +1,7 @@
-use ark_bw6_761::{Fr, G1Projective};
-use ark_poly::polynomial::univariate::DensePolynomial;
-use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use std::marker::PhantomData;
 
+use ark_bw6_761::G1Projective;
+type Fr = FrG<Config377>;
 use crate::domains::Domains;
 use crate::piop::affine_addition::{
     AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsAndBitmaskCommitments,
@@ -13,8 +13,11 @@ use crate::piop::{
 };
 use crate::utils::LagrangeEvaluations;
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
-use crate::{ Config377, BigCurveCongig};
+use crate::{BigCurveCongig, Config377, Fr as FrG};
+use ark_ec::bls12::Bls12Config;
 use ark_ec::bw6::G1Affine;
+use ark_poly::polynomial::univariate::DensePolynomial;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingCommitments {
     affine_addition_commitments: PartialSumsAndBitmaskCommitments,
@@ -62,19 +65,24 @@ impl RegisterEvaluations for CountingEvaluations {
     }
 }
 
-pub struct CountingScheme {
+pub struct CountingScheme<ConfigBls12: Bls12Config> {
     affine_addition_registers: AffineAdditionRegisters,
     bit_counting_registers: BitCountingRegisters,
     register_evaluations: Option<CountingEvaluations>,
+    _marker: PhantomData<ConfigBls12>,
 }
 
-impl ProverProtocol for CountingScheme {
+impl<ConfigBls12: Bls12Config> ProverProtocol for CountingScheme<ConfigBls12> {
     type P1 = CountingPolynomials;
     type P2 = ();
     type E = CountingEvaluations;
-    type PI = CountingPublicInput;
+    type PI = CountingPublicInput<ConfigBls12>;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig, Config377>) -> Self {
+    fn init(
+        domains: Domains<Config377>,
+        bitmask: Bitmask,
+        keyset: Keyset<BigCurveCongig, Config377>,
+    ) -> Self {
         CountingScheme {
             affine_addition_registers: AffineAdditionRegisters::new(
                 domains.clone(),
@@ -83,6 +91,7 @@ impl ProverProtocol for CountingScheme {
             ),
             bit_counting_registers: BitCountingRegisters::new(domains, &bitmask),
             register_evaluations: None,
+            _marker: Default::default(),
         }
     }
 
@@ -215,7 +224,7 @@ mod tests {
         let mut keyset = Keyset::<BigCurveCongig, Config377>::new(random_pks(m, rng));
         keyset.amplify();
         let mut scheme = CountingScheme::init(
-            Domains::new(n),
+            Domains::<Config377>::new(n),
             Bitmask::from_bits(&_random_bits(m, 0.5, rng)),
             keyset,
         );

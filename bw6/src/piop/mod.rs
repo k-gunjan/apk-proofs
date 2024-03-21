@@ -97,7 +97,7 @@ pub trait ProverProtocol {
     type E: RegisterEvaluations;
     type PI: PublicInput;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig, Config377>) -> Self;
+    fn init(domains: Domains<Config377>, bitmask: Bitmask, keyset: Keyset<BigCurveCongig, Config377>) -> Self;
 
     // These 2 methods together return register polynomials the prover should commit to.
     // The 2nd one is used only in the "packed" scheme as it requires an additional challenge

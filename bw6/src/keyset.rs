@@ -1,17 +1,17 @@
-use std::marker::PhantomData;
 use crate::domains::Domains;
-use ark_ec::bls12::Bls12Config;
 use crate::{hash_to_curve, NewKzgBw6};
+use ark_ec::bls12::Bls12Config;
+use ark_ec::short_weierstrass::Projective;
 use ark_ec::{
-    CurveGroup,
     bw6::{BW6Config, G1Affine},
+    CurveGroup,
 };
 use ark_poly::univariate::DensePolynomial;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
-use ark_ec::short_weierstrass::Projective;
+use std::marker::PhantomData;
 pub type G1Projective<P> = Projective<<P as Bls12Config>::G1Config>;
 use crate::Fr;
 
@@ -41,31 +41,32 @@ pub struct KeysetCommitment<Config761: BW6Config> {
     // Determines domain used to interpolate the vectors above.
     pub log_domain_size: u32,
 }
-pub struct Keyset<Config761: BW6Config, CongigBls12: Bls12Config> {
+pub struct Keyset<Config761: BW6Config, ConfigBls12: Bls12Config> {
     // Actual public keys, no padding.
-    pub pks: Vec<G1Projective<CongigBls12>>,
+    pub pks: Vec<G1Projective<ConfigBls12>>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
-    pub pks_polys: [DensePolynomial<Fr<CongigBls12>>; 2],
+    pub pks_polys: [DensePolynomial<Fr<ConfigBls12>>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<Fr<CongigBls12>>,
+    pub domain: Radix2EvaluationDomain<Fr<ConfigBls12>>,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
-    pub pks_evals_x4: Option<[Evaluations<Fr<CongigBls12>, Radix2EvaluationDomain<Fr<CongigBls12>>>; 2]>,
-    _marker : PhantomData<Config761>
+    pub pks_evals_x4:
+        Option<[Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>>; 2]>,
+    _marker: PhantomData<Config761>,
 }
 
-impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBls12> {
-    pub fn new(pks: Vec<G1Projective<CongigBls12>>) -> Self {
+impl<Config761: BW6Config, ConfigBls12: Bls12Config> Keyset<Config761, ConfigBls12> {
+    pub fn new(pks: Vec<G1Projective<ConfigBls12>>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain = Radix2EvaluationDomain::<Fr<CongigBls12>>::new(min_domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<Fr<ConfigBls12>>::new(min_domain_size).unwrap();
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
-        let padding_pk = hash_to_curve::<G1Projective<CongigBls12>>(b"apk-proofs");
+        let padding_pk = hash_to_curve::<G1Projective<ConfigBls12>>(b"apk-proofs");
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
-        let (pks_x, pks_y) = G1Projective::<CongigBls12>::normalize_batch(&padded_pks)
+        let (pks_x, pks_y) = G1Projective::<ConfigBls12>::normalize_batch(&padded_pks)
             .iter()
             .map(|p| (p.x, p.y))
             .unzip();
@@ -76,7 +77,7 @@ impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBl
             domain,
             pks_polys: [pks_x_poly, pks_y_poly],
             pks_evals_x4: None,
-            _marker: Default::default()
+            _marker: Default::default(),
         }
     }
 
@@ -86,7 +87,7 @@ impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBl
     }
 
     pub fn amplify(&mut self) {
-        let domains = Domains::new(self.domain.size());
+        let domains = Domains::<ConfigBls12>::new(self.domain.size());
         let pks_evals_x4 = self
             .pks_polys
             .clone()
@@ -107,7 +108,7 @@ impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBl
         }
     }
 
-    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective<CongigBls12> {
+    pub fn aggregate(&self, bitmask: &[bool]) -> G1Projective<ConfigBls12> {
         assert_eq!(bitmask.len(), self.size());
         bitmask
             .iter()
@@ -118,14 +119,14 @@ impl<Config761: BW6Config, CongigBls12: Bls12Config > Keyset<Config761, CongigBl
     }
 }
 
-impl<Config761: BW6Config,  CongigBls12: Bls12Config> Clone for Keyset<Config761, CongigBls12> {
+impl<Config761: BW6Config, ConfigBls12: Bls12Config> Clone for Keyset<Config761, ConfigBls12> {
     fn clone(&self) -> Self {
         Keyset {
             pks: self.pks.clone(),
             pks_polys: self.pks_polys.clone(),
             domain: self.domain.clone(),
             pks_evals_x4: self.pks_evals_x4.clone(),
-            _marker: Default::default()
+            _marker: Default::default(),
         }
     }
 }

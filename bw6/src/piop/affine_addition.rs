@@ -1,7 +1,6 @@
 use std::iter;
 
 use ark_bls12_377::G1Projective;
-use ark_bw6_761::{Fr};
 use ark_ec::{AffineRepr, CurveGroup, bw6::G1Affine};
 use ark_ff::{Field, One, Zero};
 use ark_poly::univariate::DensePolynomial;
@@ -10,14 +9,15 @@ use ark_poly::{
 };
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
-use crate::domains::Domains;
+use crate::domains::Domains as DomainsG;
 use crate::piop::{
     RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
 };
 use crate::utils::LagrangeEvaluations;
 use crate::{point_in_g1_complement, Keyset};
-use crate::BigCurveCongig;
-use crate::Config377;
+use crate::{Fr as FrG, Config377, BigCurveCongig};
+type Fr = FrG<Config377>;
+type Domains = DomainsG<Config377>;
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct PartialSumsCommitments(pub G1Affine<BigCurveCongig>, pub G1Affine<BigCurveCongig>);
 

@@ -1,4 +1,8 @@
-use ark_bw6_761::Fr;
+use std::marker::PhantomData;
+
+use crate::Fr as FrG;
+use ark_ec::bls12::Bls12Config;
+type Fr = FrG<Config377>;
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 
@@ -8,7 +12,7 @@ use crate::piop::affine_addition::{
 };
 use crate::piop::{ProverProtocol, RegisterEvaluations};
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use crate::{Config377, BigCurveCongig};
+use crate::{BigCurveCongig, Config377};
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AffineAdditionEvaluationsWithoutBitmask {
     pub keyset: (Fr, Fr),
@@ -26,21 +30,27 @@ impl RegisterEvaluations for AffineAdditionEvaluationsWithoutBitmask {
     }
 }
 
-pub struct BasicRegisterBuilder {
+pub struct BasicRegisterBuilder<ConfigBls12: Bls12Config> {
     registers: AffineAdditionRegisters,
     register_evaluations: Option<AffineAdditionEvaluations>,
+    _marker: PhantomData<ConfigBls12>,
 }
 
-impl ProverProtocol for BasicRegisterBuilder {
+impl<ConfigBls12: Bls12Config> ProverProtocol for BasicRegisterBuilder<ConfigBls12> {
     type P1 = PartialSumsPolynomials;
     type P2 = ();
     type E = AffineAdditionEvaluationsWithoutBitmask;
-    type PI = AccountablePublicInput;
+    type PI = AccountablePublicInput<ConfigBls12>;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset<BigCurveCongig, Config377>) -> Self {
+    fn init(
+        domains: Domains<Config377>,
+        bitmask: Bitmask,
+        keyset: Keyset<BigCurveCongig, Config377>,
+    ) -> Self {
         BasicRegisterBuilder {
             registers: AffineAdditionRegisters::new(domains, keyset, &bitmask.to_bits()),
             register_evaluations: None,
+            _marker: Default::default(),
         }
     }
 

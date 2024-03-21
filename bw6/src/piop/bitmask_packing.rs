@@ -1,4 +1,5 @@
-use ark_bw6_761::Fr;
+use crate::{Fr as FrG, Config377};
+type Fr = FrG<Config377>;
 use ark_ff::{Field, One, Zero};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_poly::{Evaluations, Polynomial, Radix2EvaluationDomain};
@@ -173,7 +174,7 @@ impl VerifierProtocol for SuccinctAccountableRegisterEvaluations {
 }
 
 pub(crate) struct BitmaskPackingRegisters {
-    domains: Domains,
+    domains: Domains<Config377>,
 
     bitmask: Evaluations<Fr, Radix2EvaluationDomain<Fr>>,
     c: Evaluations<Fr, Radix2EvaluationDomain<Fr>>,
@@ -189,7 +190,7 @@ pub(crate) struct BitmaskPackingRegisters {
 impl BitmaskPackingRegisters {
     // TODO: remove bitmask arg
     pub fn new(
-        domains: Domains,
+        domains: Domains<Config377>,
         bitmask: &Bitmask,
         bitmask_chunks_aggregation_challenge: Fr, // denoted 'r' in the write-ups
     ) -> Self {
@@ -227,7 +228,7 @@ impl BitmaskPackingRegisters {
     }
 
     fn new_unchecked(
-        domains: Domains,
+        domains: Domains<Config377>,
 
         bitmask: Vec<Fr>,
         c: Vec<Fr>,
@@ -430,7 +431,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 256;
         let m = n - 1;
-        let domains = Domains::new(n);
+        let domains = Domains::<Config377>::new(n);
 
         let bitmask = Bitmask::from_bits(&_random_bits(m, 0.5, rng));
 
