@@ -2,12 +2,15 @@ use crate::domains::Domains;
 use crate::{hash_to_curve, NewKzgBw6};
 use ark_ec::bls12::Bls12Config;
 use ark_ec::short_weierstrass::Projective;
+use ark_ec::CurveConfig;
 use ark_ec::{
     bw6::{BW6Config, G1Affine},
     CurveGroup,
 };
 use ark_poly::univariate::DensePolynomial;
-use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
+use ark_poly::{
+    domain, EvaluationDomain, Evaluations, GeneralEvaluationDomain, Radix2EvaluationDomain,
+};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::kzg::params::KzgCommitterKey;
 use fflonk::pcs::{CommitterKey, PCS};
@@ -45,20 +48,20 @@ pub struct Keyset<Config761: BW6Config, ConfigBls12: Bls12Config> {
     // Actual public keys, no padding.
     pub pks: Vec<G1Projective<ConfigBls12>>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
-    pub pks_polys: [DensePolynomial<Fr<ConfigBls12>>; 2],
+    pub pks_polys: [DensePolynomial<Fr<Config761>>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<Fr<ConfigBls12>>,
+    pub domain: Radix2EvaluationDomain<Fr<Config761>>,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
     pub pks_evals_x4:
-        Option<[Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>>; 2]>,
+        Option<[Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>>; 2]>,
     _marker: PhantomData<Config761>,
 }
 
 impl<Config761: BW6Config, ConfigBls12: Bls12Config> Keyset<Config761, ConfigBls12> {
     pub fn new(pks: Vec<G1Projective<ConfigBls12>>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain = Radix2EvaluationDomain::<Fr<ConfigBls12>>::new(min_domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<Fr<Config761>>::new(min_domain_size).unwrap();
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
@@ -70,8 +73,12 @@ impl<Config761: BW6Config, ConfigBls12: Bls12Config> Keyset<Config761, ConfigBls
             .iter()
             .map(|p| (p.x, p.y))
             .unzip();
-        let pks_x_poly = Evaluations::from_vec_and_domain(pks_x, domain).interpolate();
-        let pks_y_poly = Evaluations::from_vec_and_domain(pks_y, domain).interpolate();
+        let pks_x_poly =
+            Evaluations::<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>>::from_vec_and_domain(pks_x, domain)
+                .interpolate();
+        let pks_y_poly =
+            Evaluations::<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>>::from_vec_and_domain(pks_y, domain)
+                .interpolate();
         Self {
             pks,
             domain,

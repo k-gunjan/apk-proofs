@@ -1,37 +1,34 @@
 use crate::Fr;
-// use ark_bls12_377::Fq;
-use ark_ec::bls12::Bls12Config;
-use ark_ec::CurveConfig;
+use ark_ec::bw6::BW6Config;
 use ark_ff::{Field, One, Zero};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_std::convert::TryInto;
 
 #[derive(Clone)]
-pub struct Domains<ConfigBls12: Bls12Config> {
+pub struct Domains<Config761: BW6Config> {
     //TODO: remove pub
-    pub domain: Radix2EvaluationDomain<Fr<ConfigBls12>>,
-    pub domain2x: Radix2EvaluationDomain<Fr<ConfigBls12>>,
-    pub domain4x: Radix2EvaluationDomain<Fr<ConfigBls12>>,
+    pub domain: Radix2EvaluationDomain<Fr<Config761>>,
+    pub domain2x: Radix2EvaluationDomain<Fr<Config761>>,
+    pub domain4x: Radix2EvaluationDomain<Fr<Config761>>,
 
     /// First Lagrange basis polynomial L_0 of degree n evaluated over the domain of size 4 * n; L_0(\omega^0) = 1
-    pub l_first_evals_over_4x:
-        Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>>,
+    pub l_first_evals_over_4x: Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>>,
     /// Last  Lagrange basis polynomial L_{n-1} of degree n evaluated over the domain of size 4 * n; L_{n-1}(\omega^{n-1}}) = 1
-    pub l_last_evals_over_4x: Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>>,
+    pub l_last_evals_over_4x: Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>>,
     /// \omega, a primitive n-th root of unity. Multiplicative generator of the smaller domain.
-    pub omega: Fr<ConfigBls12>,
+    pub omega: Fr<Config761>,
     /// \omega^{n-1}
-    pub omega_inv: Fr<ConfigBls12>,
+    pub omega_inv: Fr<Config761>,
     /// The smaller domain size.
     pub size: usize,
 }
 
-impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
+impl<Config761: BW6Config> Domains<Config761> {
     pub fn new(domain_size: usize) -> Self {
-        let domain = Radix2EvaluationDomain::<Fr<ConfigBls12>>::new(domain_size).unwrap();
-        let domain2x = Radix2EvaluationDomain::<Fr<ConfigBls12>>::new(2 * domain_size).unwrap();
-        let domain4x = Radix2EvaluationDomain::<Fr<ConfigBls12>>::new(4 * domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<Fr<Config761>>::new(domain_size).unwrap();
+        let domain2x = Radix2EvaluationDomain::<Fr<Config761>>::new(2 * domain_size).unwrap();
+        let domain4x = Radix2EvaluationDomain::<Fr<Config761>>::new(4 * domain_size).unwrap();
 
         let l_first = Self::first_lagrange_basis_polynomial(domain_size);
         let l_last = Self::last_lagrange_basis_polynomial(domain_size);
@@ -52,7 +49,7 @@ impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
 
     /// Interpolates the evaluations over the smaller domain,
     /// resulting in a degree < n polynomial.
-    pub fn interpolate(&self, evals: Vec<Fr<ConfigBls12>>) -> DensePolynomial<Fr<ConfigBls12>> {
+    pub fn interpolate(&self, evals: Vec<Fr<Config761>>) -> DensePolynomial<Fr<Config761>> {
         // TODO: assert evals.len()
         Evaluations::from_vec_and_domain(evals, self.domain).interpolate()
     }
@@ -61,31 +58,31 @@ impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
     /// resulting in a vec of evaluations of length 4n.
     pub fn amplify_polynomial(
         &self,
-        poly: &DensePolynomial<Fr<ConfigBls12>>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        poly: &DensePolynomial<Fr<Config761>>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         // TODO: assert poly.degree()
         poly.evaluate_over_domain_by_ref(self.domain4x)
     }
 
     pub fn amplify(
         &self,
-        evals: Vec<Fr<ConfigBls12>>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        evals: Vec<Fr<Config761>>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         Self::_amplify(evals, self.domain, self.domain4x)
     }
 
     /// Checks if the polynomial is identically zero over the smaller domain.
-    pub fn is_zero(&self, poly: &DensePolynomial<Fr<ConfigBls12>>) -> bool {
+    pub fn is_zero(&self, poly: &DensePolynomial<Fr<Config761>>) -> bool {
         poly.divide_by_vanishing_poly(self.domain).unwrap().1 == DensePolynomial::zero()
     }
 
     /// Divides by the vanishing polynomial of the smaller domain.
     pub fn compute_quotient(
         &self,
-        poly: &DensePolynomial<Fr<ConfigBls12>>,
+        poly: &DensePolynomial<Fr<Config761>>,
     ) -> (
-        DensePolynomial<<<ConfigBls12 as Bls12Config>::G1Config as CurveConfig>::ScalarField>,
-        DensePolynomial<<<ConfigBls12 as Bls12Config>::G1Config as CurveConfig>::ScalarField>,
+        DensePolynomial<Fr<Config761>>,
+        DensePolynomial<Fr<Config761>>,
     ) {
         poly.divide_by_vanishing_poly(self.domain).unwrap() //TODO: arkworks never returns None
     }
@@ -93,15 +90,15 @@ impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
     /// Degree n polynomial c * L_{n-1} evaluated over domain of size 4 * n.
     pub fn l_last_scaled_by(
         &self,
-        c: Fr<ConfigBls12>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        c: Fr<Config761>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         &self.constant_4x(c) * &self.l_last_evals_over_4x
     }
 
     pub fn constant_4x(
         &self,
-        c: Fr<ConfigBls12>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        c: Fr<Config761>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         // TODO: ConstantEvaluations to save memory
         let evals = vec![c; self.domain4x.size()];
         Evaluations::from_vec_and_domain(evals, self.domain4x)
@@ -113,33 +110,33 @@ impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
     // takes nlogn + 4nlog(4n) = nlogn + 4nlogn + 8n
     // TODO: can we do better?
     fn _amplify(
-        evals: Vec<Fr<ConfigBls12>>,
-        domain: Radix2EvaluationDomain<Fr<ConfigBls12>>,
-        domain4x: Radix2EvaluationDomain<Fr<ConfigBls12>>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        evals: Vec<Fr<Config761>>,
+        domain: Radix2EvaluationDomain<Fr<Config761>>,
+        domain4x: Radix2EvaluationDomain<Fr<Config761>>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         let poly = Evaluations::from_vec_and_domain(evals, domain).interpolate();
         let evals4x = poly.evaluate_over_domain(domain4x);
         evals4x
     }
 
-    fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<Fr<ConfigBls12>> {
+    fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<Fr<Config761>> {
         Self::li(0, domain_size)
     }
 
-    fn last_lagrange_basis_polynomial(domain_size: usize) -> Vec<Fr<ConfigBls12>> {
+    fn last_lagrange_basis_polynomial(domain_size: usize) -> Vec<Fr<Config761>> {
         Self::li(domain_size - 1, domain_size)
     }
 
-    fn li(i: usize, domain_size: usize) -> Vec<Fr<ConfigBls12>> {
-        let mut li = vec![Fr::<ConfigBls12>::zero(); domain_size];
-        li[i] = Fr::<ConfigBls12>::one();
+    fn li(i: usize, domain_size: usize) -> Vec<Fr<Config761>> {
+        let mut li = vec![Fr::<Config761>::zero(); domain_size];
+        li[i] = Fr::<Config761>::one();
         li
     }
 
     pub fn amplify_x2(
         &self,
-        evals: Vec<Fr<ConfigBls12>>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        evals: Vec<Fr<Config761>>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         let evals = Evaluations::from_vec_and_domain(evals, self.domain);
         let poly = evals.interpolate_by_ref();
         let evals = evals.evals;
@@ -157,14 +154,14 @@ impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
 
     pub fn amplify_x4(
         &self,
-        evals: Vec<Fr<ConfigBls12>>,
-    ) -> Evaluations<Fr<ConfigBls12>, Radix2EvaluationDomain<Fr<ConfigBls12>>> {
+        evals: Vec<Fr<Config761>>,
+    ) -> Evaluations<Fr<Config761>, Radix2EvaluationDomain<Fr<Config761>>> {
         let evals = Evaluations::from_vec_and_domain(evals, self.domain);
         let poly = evals.interpolate_by_ref();
         let evals = evals.evals;
 
         let omega_4x = self.domain4x.group_gen;
-        let coset_evals: [Vec<Fr<ConfigBls12>>; 3] = (1..4)
+        let coset_evals: [Vec<Fr<Config761>>; 3] = (1..4)
             .map(|i| omega_4x.pow([i]))
             .map(|gi| Self::coset_polynomial(&poly, gi))
             .map(|p| p.evaluate_over_domain_by_ref(self.domain).evals)
@@ -184,13 +181,13 @@ impl<ConfigBls12: Bls12Config> Domains<ConfigBls12> {
 
     /// For a polynomial p returns a polynomial p' such that p'(H) = p(gH)
     fn coset_polynomial(
-        poly: &DensePolynomial<Fr<ConfigBls12>>,
-        g: Fr<ConfigBls12>,
-    ) -> DensePolynomial<Fr<ConfigBls12>> {
+        poly: &DensePolynomial<Fr<Config761>>,
+        g: Fr<Config761>,
+    ) -> DensePolynomial<Fr<Config761>> {
         let coset_coeffs = poly
             .coeffs
             .iter()
-            .scan(Fr::<ConfigBls12>::one(), |pow, &coeff| {
+            .scan(Fr::<Config761>::one(), |pow, &coeff| {
                 let coset_coeff = *pow * coeff;
                 *pow = *pow * g;
                 Some(coset_coeff)

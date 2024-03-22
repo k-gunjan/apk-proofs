@@ -1,6 +1,4 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
-
-// use ark_bls12_377::G1Affine;
 use ark_ec::bls12::Bls12Config;
 use ark_ec::bls12::G1Affine;
 pub use ark_ec::bw6::{BW6Config, TwistType, BW6};
@@ -51,7 +49,7 @@ pub mod test_helpers; //TODO: cfgtest
 
 // type NewKzgBw6 = KZG<BW6<BigCurveCongig>>;
 type NewKzgBw6<Config> = KZG<BW6<Config>>;
-pub type Fr<F> = <<F as Bls12Config>::G1Config as CurveConfig>::ScalarField;
+pub type Fr<F> = <<F as BW6Config>::G1Config as CurveConfig>::ScalarField;
 pub type G1Projective<P> = Projective<<P as Bls12Config>::G1Config>;
 
 // TODO: 1. From trait?
@@ -104,8 +102,8 @@ pub struct Proof<E: RegisterEvaluations, C: RegisterCommitments, AC: RegisterCom
     q_comm: ark_ec::bw6::G1Affine<BigCurveCongig>,
     // Prover receives \zeta, the evaluation point challenge, here
     register_evaluations: E,
-    q_zeta: Fr<Config377>,
-    r_zeta_omega: Fr<Config377>,
+    q_zeta: Fr<BigCurveCongig>,
+    r_zeta_omega: Fr<BigCurveCongig>,
     // Prover receives \nu, the KZG opening batching challenge, here
     w_at_zeta_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
     r_at_zeta_omega_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
