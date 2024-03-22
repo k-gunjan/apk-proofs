@@ -94,28 +94,35 @@ impl<ConfigBls12: Bls12Config> PublicInput for CountingPublicInput<ConfigBls12> 
 }
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct Proof<E: RegisterEvaluations, C: RegisterCommitments, AC: RegisterCommitments> {
+pub struct Proof<
+    E: RegisterEvaluations,
+    C: RegisterCommitments,
+    AC: RegisterCommitments,
+    Config761: BW6Config,
+> {
     register_commitments: C,
     // 2nd round commitments, used in "packed" scheme after get the bitmask aggregation challenge is received
     additional_commitments: AC,
     // Prover receives \phi, the constraint polynomials batching challenge, here
-    q_comm: ark_ec::bw6::G1Affine<BigCurveCongig>,
+    q_comm: ark_ec::bw6::G1Affine<Config761>,
     // Prover receives \zeta, the evaluation point challenge, here
     register_evaluations: E,
-    q_zeta: Fr<BigCurveCongig>,
-    r_zeta_omega: Fr<BigCurveCongig>,
+    q_zeta: Fr<Config761>,
+    r_zeta_omega: Fr<Config761>,
     // Prover receives \nu, the KZG opening batching challenge, here
-    w_at_zeta_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
-    r_at_zeta_omega_proof: ark_ec::bw6::G1Affine<BigCurveCongig>,
+    w_at_zeta_proof: ark_ec::bw6::G1Affine<Config761>,
+    r_at_zeta_omega_proof: ark_ec::bw6::G1Affine<Config761>,
 }
 
-pub type SimpleProof = Proof<AffineAdditionEvaluationsWithoutBitmask, PartialSumsCommitments, ()>;
-pub type PackedProof = Proof<
+pub type SimpleProof<Config761> =
+    Proof<AffineAdditionEvaluationsWithoutBitmask, PartialSumsCommitments, (), Config761>;
+pub type PackedProof<Config761> = Proof<
     SuccinctAccountableRegisterEvaluations,
     PartialSumsAndBitmaskCommitments,
     BitmaskPackingCommitments,
+    Config761,
 >;
-pub type CountingProof = Proof<CountingEvaluations, CountingCommitments, ()>;
+pub type CountingProof<Config761> = Proof<CountingEvaluations, CountingCommitments, (), Config761>;
 
 use ark_std::One;
 use ark_std::Zero;
