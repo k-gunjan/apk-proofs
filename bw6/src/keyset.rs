@@ -1,6 +1,6 @@
-use ark_bls12_377::G1Projective;
 use ark_bw6_761::Fr;
 use ark_ec::CurveGroup;
+use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -30,40 +30,61 @@ use crate::domains::Domains;
 // Verifier checks the signatures and can trust that the properties hold under some "2/3 honest validators" assumption.
 // As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct KeysetCommitment {
-    // Per-coordinate KZG commitments to a vector of BLS public keys on BLS12-377 represented in affine.
-    pub pks_comm: (ark_bw6_761::G1Affine, ark_bw6_761::G1Affine),
-    // Determines domain used to interpolate the vectors above.
+pub struct KeysetCommitment<OuterCurve>
+where
+    OuterCurve: Pairing,
+{
+    /// Per-coordinate KZG commitments to public key polynomials
+    pub pks_comm: (OuterCurve::G1Affine, OuterCurve::G1Affine),
+    /// Log₂ of the domain size used to interpolate the vectors above.
     pub log_domain_size: u32,
 }
 
+type EvaluationsX4<Field> = Evaluations<Field, Radix2EvaluationDomain<Field>>;
+
 #[derive(Clone)]
-pub struct Keyset {
+pub struct Keyset<InnerCurve, OuterCurve>
+where
+    InnerCurve: Pairing,
+    OuterCurve: Pairing,
+{
     // Actual public keys, no padding.
-    pub pks: Vec<G1Projective>,
+    pub pks: Vec<InnerCurve::G1>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
-    pub pks_polys: [DensePolynomial<Fr>; 2],
+    pub pks_polys: [DensePolynomial<OuterCurve::ScalarField>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<Fr>,
+    pub domain: Radix2EvaluationDomain<OuterCurve::ScalarField>,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
-    pub pks_evals_x4: Option<[Evaluations<Fr, Radix2EvaluationDomain<Fr>>; 2]>,
+    pub pks_evals_x4: Option<[EvaluationsX4<OuterCurve::ScalarField>; 2]>,
 }
 
-impl Keyset {
-    pub fn new(pks: Vec<G1Projective>) -> Self {
+impl<InnerCurve, OuterCurve> Keyset<InnerCurve, OuterCurve>
+where
+    InnerCurve: Pairing,
+    OuterCurve: Pairing,
+    // TODO: Remove the binding to `ark_bw6_761::G1Affine` and `Fr` after `NewKzgBw6` and domain are made generic
+    OuterCurve: Pairing<G1Affine = ark_bw6_761::G1Affine, ScalarField = Fr>,
+    // TODO: Remove the binding to Fr after domain is made generic
+    InnerCurve::G1Affine: AffineRepr<BaseField = Fr>,
+{
+    pub fn new(pks: Vec<InnerCurve::G1>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain = Radix2EvaluationDomain::<Fr>::new(min_domain_size).unwrap();
+        let domain: Radix2EvaluationDomain<OuterCurve::ScalarField> =
+            Radix2EvaluationDomain::<OuterCurve::ScalarField>::new(min_domain_size)
+                .expect("Failed to create evaluation domain");
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
-        let padding_pk = hash_to_curve::<ark_bls12_377::G1Projective>(b"apk-proofs");
+        let padding_pk = hash_to_curve::<InnerCurve::G1>(b"apk-proofs");
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
-        let (pks_x, pks_y) = G1Projective::normalize_batch(&padded_pks).iter()
-            .map(|p| (p.x, p.y))
-            .unzip();
+        let (pks_x, pks_y): (Vec<OuterCurve::ScalarField>, Vec<OuterCurve::ScalarField>) =
+            InnerCurve::G1::normalize_batch(&padded_pks)
+                .iter()
+                .map(|p: &InnerCurve::G1Affine| p.xy().expect("Invalid point"))
+                .unzip();
         let pks_x_poly = Evaluations::from_vec_and_domain(pks_x, domain).interpolate();
         let pks_y_poly = Evaluations::from_vec_and_domain(pks_y, domain).interpolate();
         Self {
@@ -81,23 +102,30 @@ impl Keyset {
 
     pub fn amplify(&mut self) {
         let domains = Domains::new(self.domain.size());
-        let pks_evals_x4 = self.pks_polys.clone().map(|z| domains.amplify_polynomial(&z));
+        let pks_evals_x4 = self
+            .pks_polys
+            .clone()
+            .map(|z| domains.amplify_polynomial(&z));
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
-    pub fn commit(&self, kzg_pk: &KzgCommitterKey<ark_bw6_761::G1Affine>) -> KeysetCommitment {
+    pub fn commit(
+        &self,
+        kzg_pk: &KzgCommitterKey<OuterCurve::G1Affine>,
+    ) -> KeysetCommitment<OuterCurve> {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
-        let pks_x_comm= NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
-        let pks_y_comm= NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
+        let pks_x_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
+        let pks_y_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,
         }
     }
 
-    pub fn aggregate(&self, bitmask: &[bool]) -> ark_bls12_377::G1Projective {
+    pub fn aggregate(&self, bitmask: &[bool]) -> InnerCurve::G1 {
         assert_eq!(bitmask.len(), self.size());
-        bitmask.iter()
+        bitmask
+            .iter()
             .zip(self.pks.iter())
             .filter(|(b, _p)| **b)
             .map(|(_b, p)| p)

@@ -8,7 +8,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::kzg::KZG;
 
 pub use bitmask::Bitmask;
-pub use keyset::{Keyset, KeysetCommitment};
+pub use keyset::{Keyset as KeysetGeneric, KeysetCommitment as KeysetCommitmentGeneric};
 
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
 use crate::piop::affine_addition::{PartialSumsAndBitmaskCommitments, PartialSumsCommitments};
@@ -38,6 +38,12 @@ mod keyset;
 pub mod test_helpers; //TODO: cfgtest
 
 type NewKzgBw6 = KZG<BW6_761>;
+
+/// Type alias for standard BLS12-377/BW6-761 combination
+pub type Keyset = KeysetGeneric<ark_bls12_377::Bls12_377, BW6_761>;
+
+/// Default type alias for Keyset commitment over BW6-761
+pub type KeysetCommitment = KeysetCommitmentGeneric<BW6_761>;
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones

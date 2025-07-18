@@ -8,7 +8,7 @@ use merlin::Transcript;
 
 use crate::{AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment, NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof};
 use crate::domains::Domains;
-use crate::keyset::Keyset;
+use crate::Keyset;
 use crate::piop::basic::BasicRegisterBuilder;
 use crate::piop::counting::CountingScheme;
 use crate::piop::packed::PackedRegisterBuilder;
