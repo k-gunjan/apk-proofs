@@ -1,14 +1,13 @@
-use ark_bw6_761::Fr;
 use ark_ec::CurveGroup;
 use ark_ec::{pairing::Pairing, AffineRepr};
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::{CommitterKey, PCS};
-use fflonk::pcs::kzg::params::KzgCommitterKey;
+use fflonk::pcs::kzg::{params::KzgCommitterKey, KZG};
 
-use crate::{hash_to_curve, NewKzgBw6};
-use crate::domains::Domains;
+use crate::hash_to_curve;
+use crate::domains::DomainsGeneric;
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -63,10 +62,7 @@ impl<InnerCurve, OuterCurve> Keyset<InnerCurve, OuterCurve>
 where
     InnerCurve: Pairing,
     OuterCurve: Pairing,
-    // TODO: Remove the binding to `ark_bw6_761::G1Affine` and `Fr` after `NewKzgBw6` and domain are made generic
-    OuterCurve: Pairing<G1Affine = ark_bw6_761::G1Affine, ScalarField = Fr>,
-    // TODO: Remove the binding to Fr after domain is made generic
-    InnerCurve::G1Affine: AffineRepr<BaseField = Fr>,
+    <<InnerCurve as Pairing>::G1Affine as AffineRepr>::BaseField: Into<OuterCurve::ScalarField>,
 {
     pub fn new(pks: Vec<InnerCurve::G1>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
@@ -80,11 +76,15 @@ where
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
-        let (pks_x, pks_y): (Vec<OuterCurve::ScalarField>, Vec<OuterCurve::ScalarField>) =
-            InnerCurve::G1::normalize_batch(&padded_pks)
-                .iter()
-                .map(|p: &InnerCurve::G1Affine| p.xy().expect("Invalid point"))
-                .unzip();
+        let affine_pks = InnerCurve::G1::normalize_batch(&padded_pks);
+        let mut pks_x = Vec::with_capacity(affine_pks.len());
+        let mut pks_y = Vec::with_capacity(affine_pks.len());
+
+        for affine_point in &affine_pks {
+            let (x, y) = affine_point.xy().expect("Invalid point");
+            pks_x.push((*x).into());
+            pks_y.push((*y).into());
+        }
         let pks_x_poly = Evaluations::from_vec_and_domain(pks_x, domain).interpolate();
         let pks_y_poly = Evaluations::from_vec_and_domain(pks_y, domain).interpolate();
         Self {
@@ -101,7 +101,7 @@ where
     }
 
     pub fn amplify(&mut self) {
-        let domains = Domains::new(self.domain.size());
+        let domains = DomainsGeneric::new(self.domain.size());
         let pks_evals_x4 = self
             .pks_polys
             .clone()
@@ -114,8 +114,8 @@ where
         kzg_pk: &KzgCommitterKey<OuterCurve::G1Affine>,
     ) -> KeysetCommitment<OuterCurve> {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
-        let pks_x_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[0]).0;
-        let pks_y_comm = NewKzgBw6::commit(kzg_pk, &self.pks_polys[1]).0;
+        let pks_x_comm = KZG::<OuterCurve>::commit(kzg_pk, &self.pks_polys[0]).0;
+        let pks_y_comm = KZG::<OuterCurve>::commit(kzg_pk, &self.pks_polys[1]).0;
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,

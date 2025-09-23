@@ -1,44 +1,41 @@
-use ark_bls12_377::Fq;
-use ark_bw6_761::Fr;
-use ark_ff::{Field, One, Zero};
-use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
+use ark_ff::{FftField, One, Zero};
 use ark_poly::polynomial::univariate::DensePolynomial;
+use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_std::convert::TryInto;
 
+// TODO: remove this default
+pub type Domains = DomainsGeneric<ark_bw6_761::Fr>;
 #[derive(Clone)]
-pub struct Domains {
+pub struct DomainsGeneric<F: FftField> {
     //TODO: remove pub
-    pub domain: Radix2EvaluationDomain<Fr>,
-    pub domain2x: Radix2EvaluationDomain<Fr>,
-    pub domain4x: Radix2EvaluationDomain<Fr>,
+    pub domain: Radix2EvaluationDomain<F>,
+    pub domain2x: Radix2EvaluationDomain<F>,
+    pub domain4x: Radix2EvaluationDomain<F>,
 
     /// First Lagrange basis polynomial L_0 of degree n evaluated over the domain of size 4 * n; L_0(\omega^0) = 1
-    pub l_first_evals_over_4x: Evaluations<Fr, Radix2EvaluationDomain<Fr>>,
+    pub l_first_evals_over_4x: Evaluations<F, Radix2EvaluationDomain<F>>,
     /// Last  Lagrange basis polynomial L_{n-1} of degree n evaluated over the domain of size 4 * n; L_{n-1}(\omega^{n-1}}) = 1
-    pub l_last_evals_over_4x: Evaluations<Fr, Radix2EvaluationDomain<Fr>>,
+    pub l_last_evals_over_4x: Evaluations<F, Radix2EvaluationDomain<F>>,
     /// \omega, a primitive n-th root of unity. Multiplicative generator of the smaller domain.
-    pub omega: Fr,
+    pub omega: F,
     /// \omega^{n-1}
-    pub omega_inv: Fr,
+    pub omega_inv: F,
     /// The smaller domain size.
     pub size: usize,
 }
 
-impl Domains {
+impl<F: FftField> DomainsGeneric<F> {
     pub fn new(domain_size: usize) -> Self {
-        let domain =
-            Radix2EvaluationDomain::<Fr>::new(domain_size).unwrap();
-        let domain2x =
-            Radix2EvaluationDomain::<Fr>::new(2 * domain_size).unwrap();
-        let domain4x =
-            Radix2EvaluationDomain::<Fr>::new(4 * domain_size).unwrap();
+        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
+        let domain2x = Radix2EvaluationDomain::<F>::new(2 * domain_size).unwrap();
+        let domain4x = Radix2EvaluationDomain::<F>::new(4 * domain_size).unwrap();
 
         let l_first = Self::first_lagrange_basis_polynomial(domain_size);
         let l_last = Self::last_lagrange_basis_polynomial(domain_size);
         let l_first_evals_over_4x = Self::_amplify(l_first, domain, domain4x);
         let l_last_evals_over_4x = Self::_amplify(l_last, domain, domain4x);
 
-        Domains {
+        DomainsGeneric {
             domain,
             domain2x,
             domain4x,
@@ -52,38 +49,44 @@ impl Domains {
 
     /// Interpolates the evaluations over the smaller domain,
     /// resulting in a degree < n polynomial.
-    pub fn interpolate(&self, evals: Vec<Fr>) -> DensePolynomial<Fr> {
+    pub fn interpolate(&self, evals: Vec<F>) -> DensePolynomial<F> {
         // TODO: assert evals.len()
         Evaluations::from_vec_and_domain(evals, self.domain).interpolate()
     }
 
     /// Produces evaluations of the degree < n polynomial over the larger domain,
     /// resulting in a vec of evaluations of length 4n.
-    pub fn amplify_polynomial(&self, poly: &DensePolynomial<Fr>) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    pub fn amplify_polynomial(
+        &self,
+        poly: &DensePolynomial<F>,
+    ) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         // TODO: assert poly.degree()
         poly.evaluate_over_domain_by_ref(self.domain4x)
     }
 
-    pub fn amplify(&self, evals: Vec<Fr>) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    pub fn amplify(&self, evals: Vec<F>) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         Self::_amplify(evals, self.domain, self.domain4x)
     }
 
     /// Checks if the polynomial is identically zero over the smaller domain.
-    pub fn is_zero(&self, poly: &DensePolynomial<Fr>) -> bool {
+    pub fn is_zero(&self, poly: &DensePolynomial<F>) -> bool {
         poly.divide_by_vanishing_poly(self.domain).unwrap().1 == DensePolynomial::zero()
     }
 
     /// Divides by the vanishing polynomial of the smaller domain.
-    pub fn compute_quotient(&self, poly: &DensePolynomial<Fr>) -> (DensePolynomial<Fq>, DensePolynomial<Fq>) {
+    pub fn compute_quotient(
+        &self,
+        poly: &DensePolynomial<F>,
+    ) -> (DensePolynomial<F>, DensePolynomial<F>) {
         poly.divide_by_vanishing_poly(self.domain).unwrap() //TODO: arkworks never returns None
     }
 
     /// Degree n polynomial c * L_{n-1} evaluated over domain of size 4 * n.
-    pub fn l_last_scaled_by(&self, c: Fr) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    pub fn l_last_scaled_by(&self, c: F) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         &self.constant_4x(c) * &self.l_last_evals_over_4x
     }
 
-    pub fn constant_4x(&self, c: Fr) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    pub fn constant_4x(&self, c: F) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         // TODO: ConstantEvaluations to save memory
         let evals = vec![c; self.domain4x.size()];
         Evaluations::from_vec_and_domain(evals, self.domain4x)
@@ -94,27 +97,31 @@ impl Domains {
     // TODO: test
     // takes nlogn + 4nlog(4n) = nlogn + 4nlogn + 8n
     // TODO: can we do better?
-    fn _amplify(evals: Vec<Fr>, domain: Radix2EvaluationDomain<Fr>, domain4x: Radix2EvaluationDomain<Fr>) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    fn _amplify(
+        evals: Vec<F>,
+        domain: Radix2EvaluationDomain<F>,
+        domain4x: Radix2EvaluationDomain<F>,
+    ) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         let poly = Evaluations::from_vec_and_domain(evals, domain).interpolate();
         let evals4x = poly.evaluate_over_domain(domain4x);
         evals4x
     }
 
-    fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<Fr> {
+    fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<F> {
         Self::li(0, domain_size)
     }
 
-    fn last_lagrange_basis_polynomial(domain_size: usize) -> Vec<Fr> {
+    fn last_lagrange_basis_polynomial(domain_size: usize) -> Vec<F> {
         Self::li(domain_size - 1, domain_size)
     }
 
-    fn li(i: usize, domain_size: usize) -> Vec<Fr> {
-        let mut li = vec![Fr::zero(); domain_size];
-        li[i] = Fr::one();
+    fn li(i: usize, domain_size: usize) -> Vec<F> {
+        let mut li = vec![F::zero(); domain_size];
+        li[i] = F::one();
         li
     }
 
-    pub fn amplify_x2(&self, evals: Vec<Fr>) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    pub fn amplify_x2(&self, evals: Vec<F>) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         let evals = Evaluations::from_vec_and_domain(evals, self.domain);
         let poly = evals.interpolate_by_ref();
         let evals = evals.evals;
@@ -122,24 +129,29 @@ impl Domains {
         let omega_2x = self.domain2x.group_gen;
         let coset_poly = Self::coset_polynomial(&poly, omega_2x);
         let coset_evals = coset_poly.evaluate_over_domain_by_ref(self.domain);
-        let evals2x = evals.into_iter().zip(coset_evals.evals)
+        let evals2x = evals
+            .into_iter()
+            .zip(coset_evals.evals)
             .flat_map(|(e, ce)| vec![e, ce])
             .collect();
         Evaluations::from_vec_and_domain(evals2x, self.domain2x)
     }
 
-    pub fn amplify_x4(&self, evals: Vec<Fr>) -> Evaluations<Fr, Radix2EvaluationDomain<Fr>> {
+    pub fn amplify_x4(&self, evals: Vec<F>) -> Evaluations<F, Radix2EvaluationDomain<F>> {
         let evals = Evaluations::from_vec_and_domain(evals, self.domain);
         let poly = evals.interpolate_by_ref();
         let evals = evals.evals;
 
         let omega_4x = self.domain4x.group_gen;
-        let coset_evals: [Vec<Fr>; 3] = (1..4)
+        let coset_evals: [Vec<F>; 3] = (1..4)
             .map(|i| omega_4x.pow([i]))
             .map(|gi| Self::coset_polynomial(&poly, gi))
             .map(|p| p.evaluate_over_domain_by_ref(self.domain).evals)
-            .collect::<Vec<_>>().try_into().unwrap();
-        let evals_4x = evals.iter()
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap();
+        let evals_4x = evals
+            .iter()
             .zip(&coset_evals[0])
             .zip(&coset_evals[1])
             .zip(&coset_evals[2])
@@ -150,9 +162,11 @@ impl Domains {
     }
 
     /// For a polynomial p returns a polynomial p' such that p'(H) = p(gH)
-    fn coset_polynomial(poly: &DensePolynomial<Fr>, g: Fr) -> DensePolynomial<Fr> {
-        let coset_coeffs = poly.coeffs.iter()
-            .scan(Fr::one(), |pow, &coeff| {
+    fn coset_polynomial(poly: &DensePolynomial<F>, g: F) -> DensePolynomial<F> {
+        let coset_coeffs = poly
+            .coeffs
+            .iter()
+            .scan(F::one(), |pow, &coeff| {
                 let coset_coeff = *pow * coeff;
                 *pow = *pow * g;
                 Some(coset_coeff)
@@ -164,6 +178,7 @@ impl Domains {
 
 #[cfg(test)]
 mod tests {
+    use ark_bw6_761::Fr;
     use ark_std::{test_rng, UniformRand};
 
     use super::*;
@@ -195,7 +210,9 @@ mod tests {
         let evals2x = poly.evaluate_over_domain_by_ref(domain2x); // p(G)
 
         let root2x = domain2x.group_gen; // g
-        let coset_coeffs = poly.coeffs.iter()
+        let coset_coeffs = poly
+            .coeffs
+            .iter()
             .scan(Fr::one(), |pow, &coeff| {
                 let coset_coeff = *pow * coeff;
                 *pow = *pow * root2x;
@@ -206,7 +223,9 @@ mod tests {
         let coset_poly = DensePolynomial::from_coefficients_vec(coset_coeffs); // p'
         let coset_evals = coset_poly.evaluate_over_domain_by_ref(domain); // p'(H)
 
-        let evals2x_2: Vec<_> = evals.into_iter().zip(coset_evals.evals)
+        let evals2x_2: Vec<_> = evals
+            .into_iter()
+            .zip(coset_evals.evals)
             .flat_map(|(e, ce)| vec![e, ce])
             .collect(); // p(G)
 
@@ -218,7 +237,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
 
-        let domains = Domains::new(n);
+        let domains = DomainsGeneric::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
         let poly = domains.interpolate(evals.clone());
@@ -235,7 +254,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
 
-        let domains = Domains::new(n);
+        let domains = DomainsGeneric::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
         let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
@@ -256,7 +275,7 @@ mod tests {
         let mut c_ln = vec![Fr::zero(); n];
         c_ln[n - 1] = c;
 
-        let domains = Domains::new(n);
+        let domains = DomainsGeneric::new(n);
 
         assert_eq!(domains.l_last_scaled_by(c), domains.amplify(c_ln));
     }
