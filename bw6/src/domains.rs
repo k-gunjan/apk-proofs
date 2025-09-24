@@ -1,4 +1,4 @@
-use ark_ff::{FftField, One, Zero};
+use ark_ff::{FftField, Zero};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_std::convert::TryInto;

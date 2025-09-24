@@ -20,7 +20,7 @@ pub struct Prover {
     domains: Domains,
     keyset: Keyset,
     kzg_pk: KzgCommitterKey<ark_bw6_761::G1Affine>,
-    preprocessed_transcript: Transcript,
+    preprocessed_transcript: Transcript, //TODO: should transcript be generic ?
 }
 
 
@@ -37,7 +37,8 @@ impl Prover {
 
         // assert!(kzg_params.fits(keyset.domain.size())); // SRS contains enough elements
         empty_transcript.set_protocol_params(&keyset.domain, &kzg_params.raw_vk());
-        empty_transcript.set_keyset_commitment(&keyset_comm);
+        // TODO: remove concrete type after Prover is generic over the curve
+        <Transcript as ApkTranscript<BW6_761>>::set_keyset_commitment(&mut empty_transcript, keyset_comm);
 
         keyset.amplify();
 
@@ -70,7 +71,7 @@ impl Prover {
 
         let mut transcript = self.preprocessed_transcript.clone();
         let public_input = P::PI::new(&apk, &bitmask);
-        transcript.append_public_input(&public_input);
+        <Transcript as ApkTranscript<BW6_761>>::append_public_input(&mut transcript, &public_input);
 
         // 1. Compute and commit to the basic registers.
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
@@ -79,36 +80,36 @@ impl Prover {
             |p| NewKzgBw6::commit(&self.kzg_pk, &p).0
         );
 
-        transcript.append_register_commitments(&partial_sums_commitments);
+         <Transcript as ApkTranscript<BW6_761>>::append_register_commitments(&mut transcript, &partial_sums_commitments);
 
         // 2. Receive bitmask aggregation challenge,
         // compute and commit to succinct accountability registers.
-        let r = transcript.get_bitmask_aggregation_challenge();
+        let r = <Transcript as ApkTranscript<BW6_761>>::get_bitmask_aggregation_challenge(&mut transcript);
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
         let acc_register_commitments = acc_register_polynomials.commit(
             |p| NewKzgBw6::commit(&self.kzg_pk, &p).0
         );
-        transcript.append_2nd_round_register_commitments(&acc_register_commitments);
+        <Transcript as ApkTranscript<BW6_761>>::append_2nd_round_register_commitments(&mut transcript, &acc_register_commitments);
 
         // 3. Receive constraint aggregation challenge,
         // compute and commit to the quotient polynomial.
-        let phi = transcript.get_constraints_aggregation_challenge();
+        let phi = <Transcript as ApkTranscript<BW6_761>>::get_constraints_aggregation_challenge(&mut transcript);
         let q_poly = protocol.compute_quotient_polynomial(phi, self.keyset.domain);
         let q_comm = NewKzgBw6::commit(&self.kzg_pk, &q_poly).0;
-        transcript.append_quotient_commitment(&q_comm);
+        <Transcript as ApkTranscript<BW6_761>>::append_quotient_commitment(&mut transcript, &q_comm);
 
         // 4. Receive the evaluation point,
         // evaluate register polynomials and the quotient polynomial,
         // compute the linearization polynomial and evaluate it at the shifted evaluation point,
         // commit to all the evaluations.
-        let zeta = transcript.get_evaluation_point();
+        let zeta = <Transcript as ApkTranscript<BW6_761>>::get_evaluation_point(&mut transcript);
         let register_evaluations = protocol.evaluate_register_polynomials(zeta);
         let q_zeta = q_poly.evaluate(&zeta);
         let zeta_omega = zeta * self.keyset.domain.group_gen;
         let r_poly = protocol.compute_linearization_polynomial(phi, zeta);
         let r_zeta_omega = r_poly.evaluate(&zeta_omega);
-        transcript.append_evaluations(&register_evaluations, &q_zeta, &r_zeta_omega);
+         <Transcript as ApkTranscript<BW6_761>>::append_evaluations(&mut transcript, &register_evaluations, &q_zeta, &r_zeta_omega);
 
         // 5. Receive the polynomials aggregation challenge,
         // open the aggregated polynomial at the evaluation point,
@@ -116,7 +117,7 @@ impl Prover {
         // and commit to the opening proofs.
         let mut register_polynomials = protocol.get_register_polynomials_to_open();
         register_polynomials.push(q_poly);
-        let nus = transcript.get_kzg_aggregation_challenges(register_polynomials.len());
+        let nus =  <Transcript as ApkTranscript<BW6_761>>::get_kzg_aggregation_challenges(&mut transcript, register_polynomials.len());
         let w_poly = fflonk::aggregation::single::aggregate_polys(&register_polynomials, &nus);
         let w_at_zeta_proof = NewKzgBw6::open(&self.kzg_pk, &w_poly, zeta);
         let r_at_zeta_omega_proof = NewKzgBw6::open(&self.kzg_pk, &r_poly, zeta_omega);

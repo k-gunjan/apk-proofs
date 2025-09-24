@@ -7,7 +7,7 @@ use fflonk::aggregation::single::aggregate_claims_multiexp;
 use fflonk::pcs::kzg::KzgOpening;
 use fflonk::pcs::kzg::params::{KzgVerifierKey, RawKzgVerifierKey};
 use fflonk::pcs::RawVerifierKey;
-use merlin::{Transcript, TranscriptRng};
+use merlin::{Transcript as MerlinTranscript, TranscriptRng};
 
 use crate::{AccountablePublicInput, CountingProof, CountingPublicInput, endo, KeysetCommitment, NewKzgBw6, PackedProof, Proof, PublicInput, RegisterCommitments, SimpleProof, utils};
 use crate::fsrng::fiat_shamir_rng;
@@ -18,6 +18,9 @@ use crate::piop::bitmask_packing::{BitmaskPackingCommitments, SuccinctAccountabl
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
 use crate::transcript::ApkTranscript;
 use crate::utils::LagrangeEvaluations;
+
+type Transcript = MerlinTranscript;
+// impl ApkTranscript<BW6_761> for Transcript {}
 
 pub struct Verifier {
     domain: Radix2EvaluationDomain<Fr>,
@@ -189,15 +192,16 @@ impl Verifier {
             E: RegisterEvaluations,
     {
         let mut transcript = self.preprocessed_transcript.clone();
-        transcript.append_public_input(public_input);
-        transcript.append_register_commitments(&proof.register_commitments);
-        let r = transcript.get_bitmask_aggregation_challenge();
-        transcript.append_2nd_round_register_commitments(&proof.additional_commitments);
-        let phi = transcript.get_constraints_aggregation_challenge();
-        transcript.append_quotient_commitment(&proof.q_comm);
-        let zeta = transcript.get_evaluation_point();
-        transcript.append_evaluations(&proof.register_evaluations, &proof.q_zeta, &proof.r_zeta_omega);
-        let nus = transcript.get_kzg_aggregation_challenges(batch_size);
+        // TODO: remove concrete type after Verifier is generic over the curve
+         <Transcript as ApkTranscript<BW6_761>>::append_public_input(&mut transcript, public_input);
+         <Transcript as ApkTranscript<BW6_761>>::append_register_commitments(&mut transcript, &proof.register_commitments);
+        let r =  <Transcript as ApkTranscript<BW6_761>>::get_bitmask_aggregation_challenge(&mut transcript);
+         <Transcript as ApkTranscript<BW6_761>>::append_2nd_round_register_commitments(&mut transcript, &proof.additional_commitments);
+        let phi =  <Transcript as ApkTranscript<BW6_761>>::get_constraints_aggregation_challenge(&mut transcript);
+         <Transcript as ApkTranscript<BW6_761>>::append_quotient_commitment(&mut transcript, &proof.q_comm);
+        let zeta =  <Transcript as ApkTranscript<BW6_761>>::get_evaluation_point(&mut transcript);
+         <Transcript as ApkTranscript<BW6_761>>::append_evaluations(&mut transcript, &proof.register_evaluations, &proof.q_zeta, &proof.r_zeta_omega);
+        let nus =  <Transcript as ApkTranscript<BW6_761>>::get_kzg_aggregation_challenges(&mut transcript, batch_size);
         (Challenges { r, phi, zeta, nus }, fiat_shamir_rng(&mut transcript))
     }
 
@@ -209,8 +213,8 @@ impl Verifier {
         let domain_size = 2usize.pow(pks_comm.log_domain_size);
         let domain = Radix2EvaluationDomain::<Fr>::new(domain_size).unwrap();
         assert_eq!(domain.size(), domain_size);
-        empty_transcript.set_protocol_params(&domain, &kzg_vk);
-        empty_transcript.set_keyset_commitment(&pks_comm);
+         <Transcript as ApkTranscript<BW6_761>>::set_protocol_params(&mut empty_transcript,&domain, &kzg_vk);
+         <Transcript as ApkTranscript<BW6_761>>::set_keyset_commitment(&mut empty_transcript, &pks_comm);
 
         let kzg_pvk = kzg_vk.prepare();
         Self {
