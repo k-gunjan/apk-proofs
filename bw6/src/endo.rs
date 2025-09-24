@@ -1,9 +1,7 @@
 use std::ops::AddAssign;
-
-use ark_bw6_761::{Fq, G1Projective};
-use ark_ec::bls12::Bls12Config;
+use ark_ec::bw6::{BW6Config, G1Projective};
 use ark_ec::Group;
-use ark_ff::{BitIteratorBE, MontFp, Zero};
+use ark_ff::{BitIteratorBE, Zero};
 
 // See https://github.com/celo-org/zexe/blob/master/algebra/src/bw6_761/curves/g1.rs#L37-L71
 // and also https://github.com/celo-org/zexe/blob/master/scripts/glv_lattice_basis/src/lib.rs
@@ -12,18 +10,10 @@ use ark_ff::{BitIteratorBE, MontFp, Zero};
 /// \omega = 0x531dc16c6ecd27aa846c61024e4cca6c1f31e53bd9603c2d17be416c5e44
 /// 26ee4a737f73b6f952ab5e57926fa701848e0a235a0a398300c65759fc4518315
 /// 1f2f082d4dcb5e37cb6290012d96f8819c547ba8a4000002f962140000000002a
-const OMEGA: Fq = MontFp!(
-        "196898582409020929727861073970057715139766638230382572845074161156680037021882725775086501\
-        3421937292370006175842381275743914023380727582819905021229583192207421122272650305267822868\
-        639090213645505120388400344940985710520836292650"
-);
 
-
-const U: &'static [u64] = ark_bls12_377::Config::X;
-
-fn mul_by_u(p: &G1Projective) -> G1Projective {
-    let mut res = G1Projective::zero();
-    for i in BitIteratorBE::without_leading_zeros(U) {
+fn mul_by_u<C: BW6Config>(p: &G1Projective<C>, u: &[u64]) -> G1Projective<C> {
+    let mut res = G1Projective::<C>::zero();
+    for i in BitIteratorBE::without_leading_zeros(u) {
         res.double_in_place();
         if i {
             res.add_assign(p)
@@ -32,26 +22,28 @@ fn mul_by_u(p: &G1Projective) -> G1Projective {
     res
 }
 
-fn glv_endomorphism_proj(p: &G1Projective) -> G1Projective {
-    G1Projective::new_unchecked(p.x * OMEGA, p.y, p.z)
+fn glv_endomorphism_proj<C: BW6Config>(p: &G1Projective<C>, omega: C::Fp) -> G1Projective<C> {
+    // TODO: assert that omega is valid for the curve?
+    G1Projective::<C>::new_unchecked(p.x * omega, p.y, p.z)
 }
 
 // See https://eprint.iacr.org/2020/351.pdf, section 3.1
-pub fn subgroup_check(p: &G1Projective) -> bool {
-    let up = mul_by_u(p);
-    let u2p = mul_by_u(&up);
-    let u3p = mul_by_u(&u2p);
+pub fn subgroup_check<C: BW6Config>(p: &G1Projective<C>, omega: C::Fp, u: &[u64]) -> bool {
+    let up = mul_by_u::<C>(p, u);
+    let u2p = mul_by_u::<C>(&up, u);
+    let u3p = mul_by_u::<C>(&u2p, u);
 
-    (up + p + glv_endomorphism_proj(&(u3p - u2p + p))).is_zero()
+    (up + p + glv_endomorphism_proj::<C>(&(u3p - u2p + p), omega)).is_zero()
 }
 
 
 #[cfg(test)]
 mod tests {
-    use ark_bw6_761::{Fr, G1Affine};
+    use ark_bw6_761::{Config, Fr, Fq, G1Affine};
     use ark_ec::{AffineRepr, CurveGroup};
-    use ark_ff::{Field, One};
+    use ark_ff::{Field, MontFp, One};
     use ark_std::{test_rng, UniformRand};
+    use crate::{OMEGA, U};
 
     use super::*;
 
@@ -96,7 +88,7 @@ mod tests {
 
         let p = ark_bw6_761::G1Projective::rand(rng);
 
-        assert_eq!(glv_endomorphism_proj(&p), p * LAMBDA);
+        assert_eq!(glv_endomorphism_proj::<Config>(&p, OMEGA), p * LAMBDA);
     }
 
     #[test]
@@ -105,7 +97,7 @@ mod tests {
 
         let p = ark_bw6_761::G1Projective::rand(rng);
 
-        assert!(subgroup_check(&p));
+        assert!(subgroup_check::<Config>(&p, OMEGA, U));
 
         let point_not_in_g1 = loop {
             let x = Fq::rand(rng);
@@ -117,6 +109,6 @@ mod tests {
 
         assert!(point_not_in_g1.is_on_curve());
         assert!(!point_not_in_g1.is_in_correct_subgroup_assuming_on_curve());
-        assert!(!subgroup_check(&point_not_in_g1.into_group()));
+        assert!(!subgroup_check::<Config>(&point_not_in_g1.into_group(), OMEGA, U));
     }
 }

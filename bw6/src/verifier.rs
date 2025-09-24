@@ -1,4 +1,4 @@
-use ark_bw6_761::{BW6_761, Fr};
+use ark_bw6_761::{BW6_761, Fr, Config};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{One, UniformRand};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
@@ -18,7 +18,7 @@ use crate::piop::bitmask_packing::{BitmaskPackingCommitments, SuccinctAccountabl
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
 use crate::transcript::ApkTranscript;
 use crate::utils::LagrangeEvaluations;
-
+use crate::{U, OMEGA};
 type Transcript = MerlinTranscript;
 // impl ApkTranscript<BW6_761> for Transcript {}
 
@@ -178,8 +178,8 @@ impl Verifier {
         end_timer!(t_kzg_batch_opening);
 
         let t_lazy_subgroup_checks = start_timer!(|| "lazy subgroup check");
-        assert!(endo::subgroup_check(&acc_opening.acc.into_group()));
-        assert!(endo::subgroup_check(&acc_opening.proof.into_group()));
+        assert!(endo::subgroup_check::<Config>(&acc_opening.acc.into_group(), OMEGA, U));
+        assert!(endo::subgroup_check::<Config>(&acc_opening.proof.into_group(), OMEGA, U));
         end_timer!(t_lazy_subgroup_checks);
 
         end_timer!(t_kzg);

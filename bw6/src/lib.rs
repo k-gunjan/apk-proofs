@@ -1,7 +1,7 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
 
 use ark_bls12_377::G1Affine;
-use ark_bw6_761::{BW6_761, Fr};
+use ark_bw6_761::{BW6_761, Fr, Fq};
 use ark_ec::CurveGroup;
 use ark_ff::MontFp;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
@@ -44,6 +44,15 @@ pub type Keyset = KeysetGeneric<ark_bls12_377::Bls12_377, BW6_761>;
 
 /// Default type alias for Keyset commitment over BW6-761
 pub type KeysetCommitment = KeysetCommitmentGeneric<BW6_761>;
+
+pub const OMEGA: Fq = MontFp!(
+        "196898582409020929727861073970057715139766638230382572845074161156680037021882725775086501\
+        3421937292370006175842381275743914023380727582819905021229583192207421122272650305267822868\
+        639090213645505120388400344940985710520836292650"
+);
+
+use ark_ec::bls12::Bls12Config;
+pub const U: &'static [u64] = ark_bls12_377::Config::X;
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones
