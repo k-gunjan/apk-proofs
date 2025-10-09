@@ -1,26 +1,25 @@
 use std::iter;
-
-use ark_bls12_377::G1Projective;
-use ark_bw6_761::{Fr, G1Affine};
+use std::marker::PhantomData;
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{Field, One, Zero};
+use ark_ff::{FftField, Field, One, Zero};
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use fflonk::pcs::PCS;
 
-use crate::{Keyset, point_in_g1_complement};
-use crate::domains::Domains;
+use crate::{point_in_g1_complement_g, KeysetGeneric};
+use crate::domains::DomainsGeneric;
 use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::utils::LagrangeEvaluations;
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct PartialSumsCommitments(
-    pub ark_bw6_761::G1Affine,
-    pub ark_bw6_761::G1Affine,
+pub struct PartialSumsCommitments<G: AffineRepr> (
+    pub G,
+    pub G,
 );
 
-impl RegisterCommitments for PartialSumsCommitments {
-    fn as_vec(&self) -> Vec<G1Affine> {
+impl<G: AffineRepr> RegisterCommitments<G> for PartialSumsCommitments<G> {
+    fn as_vec(&self) -> Vec<G> {
         vec![
             self.0,
             self.1,
@@ -28,12 +27,12 @@ impl RegisterCommitments for PartialSumsCommitments {
     }
 }
 
-pub type PartialSumsPolynomials = [DensePolynomial<Fr>; 2];
+pub type PartialSumsPolynomials<F: Field> = [DensePolynomial<F>; 2];
 
-impl RegisterPolynomials for PartialSumsPolynomials {
-    type C = PartialSumsCommitments;
+impl<G: AffineRepr> RegisterPolynomials<G> for PartialSumsPolynomials<G::ScalarField> {
+    type C = PartialSumsCommitments<G>;
 
-    fn commit<F: Fn(&DensePolynomial<Fr>) -> G1Affine>(&self, f: F) -> PartialSumsCommitments {
+    fn commit<F: Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: F) -> PartialSumsCommitments<G> {
         PartialSumsCommitments(f(&self[0]), f(&self[1]))
     }
 }
@@ -41,28 +40,28 @@ impl RegisterPolynomials for PartialSumsPolynomials {
 //TODO: move to packed.rs?
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct PartialSumsAndBitmaskCommitments {
-    pub partial_sums: PartialSumsCommitments,
-    pub bitmask: ark_bw6_761::G1Affine,
+pub struct PartialSumsAndBitmaskCommitments<G: AffineRepr> {
+    pub partial_sums: PartialSumsCommitments<G>,
+    pub bitmask: G,
 }
 
-impl RegisterCommitments for PartialSumsAndBitmaskCommitments {
-    fn as_vec(&self) -> Vec<G1Affine> {
+impl<G: AffineRepr> RegisterCommitments<G> for PartialSumsAndBitmaskCommitments<G> {
+    fn as_vec(&self) -> Vec<G> {
         let mut res = vec![self.bitmask];
         res.extend(self.partial_sums.as_vec());
         res
     }
 }
 
-pub struct PartialSumsAndBitmaskPolynomials {
-    pub partial_sums: PartialSumsPolynomials,
-    pub bitmask: DensePolynomial<Fr>,
+pub struct PartialSumsAndBitmaskPolynomials<F: Field> {
+    pub partial_sums: PartialSumsPolynomials<F>,
+    pub bitmask: DensePolynomial<F>,
 }
 
-impl RegisterPolynomials for PartialSumsAndBitmaskPolynomials {
-    type C = PartialSumsAndBitmaskCommitments;
+impl<G: AffineRepr> RegisterPolynomials<G> for PartialSumsAndBitmaskPolynomials<G::ScalarField> {
+    type C = PartialSumsAndBitmaskCommitments<G>;
 
-    fn commit<F: Clone + Fn(&DensePolynomial<Fr>) -> G1Affine>(&self, f: F) -> PartialSumsAndBitmaskCommitments {
+    fn commit<F: Clone + Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: F) -> PartialSumsAndBitmaskCommitments<G> {
         PartialSumsAndBitmaskCommitments {
             partial_sums: self.partial_sums.commit(f.clone()),
             bitmask: f(&self.bitmask),
@@ -71,21 +70,21 @@ impl RegisterPolynomials for PartialSumsAndBitmaskPolynomials {
 }
 
 #[derive(Clone)] //TODO: remove
-pub struct AffineAdditionPolynomials {
-    pub keyset: [DensePolynomial<Fr>; 2],
-    pub bitmask: DensePolynomial<Fr>,
-    pub partial_sums: [DensePolynomial<Fr>; 2],
+pub struct AffineAdditionPolynomials<F: Field> {
+    pub keyset: [DensePolynomial<F>; 2],
+    pub bitmask: DensePolynomial<F>,
+    pub partial_sums: [DensePolynomial<F>; 2],
 }
 
-impl AffineAdditionPolynomials {
-    pub fn to_vec(self) -> Vec<DensePolynomial<Fr>> {
+impl<F: FftField> AffineAdditionPolynomials<F> {
+    pub fn to_vec(self) -> Vec<DensePolynomial<F>> {
         IntoIterator::into_iter(self.keyset)
             .chain(std::iter::once(self.bitmask))
             .chain(self.partial_sums)
             .collect()
     }
 
-    fn evaluate(&self, point: Fr) -> AffineAdditionEvaluations {
+    fn evaluate(&self, point: F) -> AffineAdditionEvaluations<F> {
         AffineAdditionEvaluations {
             keyset: (self.keyset[0].evaluate(&point), self.keyset[1].evaluate(&point)),
             bitmask: self.bitmask.evaluate(&point),
@@ -96,14 +95,15 @@ impl AffineAdditionPolynomials {
 
 
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone)]
-pub struct AffineAdditionEvaluations {
-    pub keyset: (Fr, Fr),
-    pub bitmask: Fr,
-    pub partial_sums: (Fr, Fr),
+pub struct AffineAdditionEvaluations<F: FftField> {
+    pub keyset: (F, F),
+    pub bitmask: F,
+    pub partial_sums: (F, F),
 }
 
-impl RegisterEvaluations for AffineAdditionEvaluations {
-    fn as_vec(&self) -> Vec<Fr> {
+
+impl<F: FftField> RegisterEvaluations<F> for AffineAdditionEvaluations<F> {
+    fn as_vec(&self) -> Vec<F> {
         vec![
             self.keyset.0,
             self.keyset.1,
@@ -114,23 +114,29 @@ impl RegisterEvaluations for AffineAdditionEvaluations {
     }
 }
 
-impl VerifierProtocol for AffineAdditionEvaluations {
+impl<IC, OC, S> VerifierProtocol<IC, OC, S> for AffineAdditionEvaluations<OC::ScalarField>
+where
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
+    S: PCS<OC::ScalarField>,
+{
     type C2 = ();
-    type C1 = PartialSumsCommitments;
+    type C1 = PartialSumsCommitments<OC::Affine>;
 
     const POLYS_OPENED_AT_ZETA: usize = 5;
 
     fn restore_commitment_to_linearization_polynomial(&self,
-                                                      phi: Fr,
-                                                      zeta_minus_omega_inv: Fr,
-                                                      commitments: &PartialSumsCommitments,
+                                                      phi: OC::ScalarField,
+                                                      zeta_minus_omega_inv: OC::ScalarField,
+                                                      commitments: &PartialSumsCommitments<OC::Affine>,
                                                       _extra_commitments: &(),
-    ) -> ark_bw6_761::G1Projective {
+    ) -> OC {
         let b = self.bitmask;
         let (x1, y1) = self.partial_sums;
         let (x2, y2) = self.keyset;
 
-        let mut r_comm = ark_bw6_761::G1Projective::zero();
+        let mut r_comm = OC::zero();
         // X3 := acc_x polynomial
         // Y3 := acc_y polynomial
         // a1_lin = b(x1-x2)^2.X3 + (1-b)Y3
@@ -138,50 +144,62 @@ impl VerifierProtocol for AffineAdditionEvaluations {
         // X3 term = b(x1-x2)^2 + b(y1-y2)phi + (1-b)phi
         // Y3 term = (1-b) + b(x1-x2)phi
         // ...and both multiplied by (\zeta - \omega^{n-1}) // = zeta_minus_omega_inv
-        r_comm += commitments.0 * (zeta_minus_omega_inv * (b * (x1 - x2) * (x1 - x2) + b * (y1 - y2) * phi + (Fr::one() - b) * phi));
-        r_comm += commitments.1 * (zeta_minus_omega_inv * ((Fr::one() - b) + b * (x1 - x2) * phi));
+        r_comm += commitments.0 * (zeta_minus_omega_inv * (b * (x1 - x2) * (x1 - x2) + b * (y1 - y2) * phi + (OC::ScalarField::one() - b) * phi));
+        r_comm += commitments.1 * (zeta_minus_omega_inv * ((OC::ScalarField::one() - b) + b * (x1 - x2) * phi));
         r_comm
     }
 }
 
-impl AffineAdditionEvaluations {
-    pub fn evaluate_constraint_polynomials(
+impl<F: FftField> AffineAdditionEvaluations<F>
+{
+    pub fn evaluate_constraint_polynomials<IC, OC>(
         &self,
-        apk: ark_bls12_377::G1Affine,
-        evals_at_zeta: &LagrangeEvaluations<Fr>,
-    ) -> Vec<Fr> {
+        // apk: ark_bls12_377::G1Affine,
+        apk: &IC::Affine,
+        evals_at_zeta: &LagrangeEvaluations<F>,
+    ) -> Vec<F> 
+    where
+    IC: CurveGroup,
+    OC:CurveGroup<ScalarField = F>,
+    OC::ScalarField: From<IC::BaseField>,
+{
         let b = self.bitmask;
         let (x1, y1) = self.partial_sums;
         let (x2, y2) = self.keyset;
 
-        let (a1, a2) = Constraints::evaluate_conditional_affine_addition_constraints_linearized(evals_at_zeta.zeta_minus_omega_inv, b, x1, y1, x2, y2);
-        let a3 = Constraints::evaluate_bitmask_booleanity_constraint(b);
-        let (a4, a5) = Constraints::evaluate_public_inputs_constraints(apk, &evals_at_zeta, x1, y1);
+        let (a1, a2) = Constraints::<IC, OC>::evaluate_conditional_affine_addition_constraints_linearized(evals_at_zeta.zeta_minus_omega_inv, b, x1, y1, x2, y2);
+        let a3 = Constraints::<IC, OC>::evaluate_bitmask_booleanity_constraint(b);
+        let (a4, a5) = Constraints::<IC, OC>::evaluate_public_inputs_constraints(*apk, &evals_at_zeta, x1, y1);
         vec![a1, a2, a3, a4, a5]
     }
 }
 
 /// Register polynomials in evaluation form amplified to support degree 4n constraints
-pub struct AffineAdditionRegisters {
-    pub domains: Domains,
-    bitmask: Evaluations<Fr, Radix2EvaluationDomain<Fr>>,
+pub struct AffineAdditionRegisters<F: FftField> {
+    pub domains: DomainsGeneric<F>,
+    bitmask: Evaluations<F, Radix2EvaluationDomain<F,>>,
     // public keys' coordinates
-    keyset: [Evaluations<Fr, Radix2EvaluationDomain<Fr>>; 2],
+    keyset: [Evaluations<F, Radix2EvaluationDomain<F,>>; 2],
     // aggregate public key rolling sum coordinates
-    partial_sums: [Evaluations<Fr, Radix2EvaluationDomain<Fr>>; 2],
+    partial_sums: [Evaluations<F, Radix2EvaluationDomain<F,>>; 2],
 
-    pub polynomials: AffineAdditionPolynomials,
+    pub polynomials: AffineAdditionPolynomials<F>,
 }
 
-impl AffineAdditionRegisters {
-    pub fn new(domains: Domains,
-               keyset: Keyset,
+impl<F: FftField> AffineAdditionRegisters<F> {
+    pub fn new<IC, OC>(domains: DomainsGeneric<F>,
+               keyset: KeysetGeneric<IC, OC>,
                bitmask: &[bool],
-    ) -> Self {
+    ) -> Self 
+where
+    IC: CurveGroup,
+    OC: CurveGroup<ScalarField = F>,
+    OC::ScalarField: From<IC::BaseField>,
+{
         assert_eq!(bitmask.len(), keyset.size());
         let domain_size = keyset.domain.size();
 
-        let h = point_in_g1_complement().into_group();
+        let h = point_in_g1_complement_g::<IC>();
         let apk_acc = bitmask.iter().zip(keyset.pks.iter())
             .scan(h, |acc, (b, pk)| {
                 if *b {
@@ -192,34 +210,44 @@ impl AffineAdditionRegisters {
         let apk_acc: Vec<_> = iter::once(h)
             .chain(apk_acc)
             .collect();
-        let mut apk_acc = G1Projective::normalize_batch(&apk_acc);
+        let mut apk_acc = IC::normalize_batch(&apk_acc);
 
         apk_acc.resize(domain_size, apk_acc.last().cloned().unwrap());
-        let apk_acc = apk_acc.iter()
-            .map(|p| (p.x, p.y))
-            .unzip();
+        let mut apk_acc_x = Vec::with_capacity(apk_acc.len());
+        let mut apk_acc_y = Vec::with_capacity(apk_acc.len());
+        apk_acc.iter()
+            .map(|p| {
+                apk_acc_x.push((*p.x().expect("invalid point")).into()); 
+                apk_acc_y.push((*p.y().expect("invalid point")).into());
+            })
+            .collect::<Vec<_>>();
 
         let mut bitmask = bitmask.to_vec();
         bitmask.resize(domain_size - 1, false);
 
         let bitmask = bitmask.iter()
-            .map(|b| if *b { Fr::one() } else { Fr::zero() })
-            .chain(iter::once(Fr::zero())) //TODO: pad with Fr::one()
+            .map(|b| if *b { OC::ScalarField::one() } else { OC::ScalarField::zero() })
+            .chain(iter::once(OC::ScalarField::zero())) //TODO: pad with Fr::one()
             .collect();
 
         Self::new_unchecked(
             domains,
             bitmask,
             keyset,
-            [apk_acc.0, apk_acc.1],
+            [apk_acc_x, apk_acc_y],
         )
     }
 
-    fn new_unchecked(domains: Domains,
-                     bitmask: Vec<Fr>,
-                     keyset: Keyset,
-                     apk_acc: [Vec<Fr>; 2],
-    ) -> Self {
+    fn new_unchecked<IC, OC>(domains: DomainsGeneric<F>,
+                     bitmask: Vec<F>,
+                     keyset: KeysetGeneric<IC, OC>,
+                     apk_acc: [Vec<F>; 2],
+    ) -> Self 
+where
+    IC: CurveGroup,
+    OC: CurveGroup<ScalarField = F>,
+    OC::ScalarField: From<IC::BaseField>,
+{
         let bitmask_polynomial = domains.interpolate(bitmask);
         let partial_sums_polynomial = apk_acc.map(|z| domains.interpolate(z));
         let partial_sums = partial_sums_polynomial.clone().map(|z| domains.amplify_polynomial(&z));
@@ -238,57 +266,62 @@ impl AffineAdditionRegisters {
         }
     }
 
-    pub fn evaluate_register_polynomials(&self, point: Fr) -> AffineAdditionEvaluations {
+    pub fn evaluate_register_polynomials(&self, point: F) -> AffineAdditionEvaluations<F> {
         self.polynomials.evaluate(point)
     }
 
     // Compute linearization polynomial
     // See https://hackmd.io/CdZkCe2PQuy7XG7CLOBRbA step 4
     // deg(r) = n, so it can be computed in the monomial basis
-    pub fn compute_constraints_linearized(&self, evaluations: &AffineAdditionEvaluations, zeta: Fr) -> Vec<DensePolynomial<Fr>> {
+    pub fn compute_constraints_linearized(&self, evaluations: &AffineAdditionEvaluations<F>, zeta: F) -> Vec<DensePolynomial<F>> {
         let zeta_minus_omega_inv = zeta - self.domains.omega_inv;
         let b_zeta = evaluations.bitmask;
         let (acc_x_zeta, acc_y_zeta) = (evaluations.partial_sums.0, evaluations.partial_sums.1);
         let (pks_x_zeta, pks_y_zeta) = (evaluations.keyset.0, evaluations.keyset.1);
         let [acc_x_poly, acc_y_poly] = &self.polynomials.partial_sums;
 
-        let mut a1_lin = DensePolynomial::<Fr>::zero();
+        let mut a1_lin = DensePolynomial::<F>::zero();
         a1_lin += (b_zeta * (acc_x_zeta - pks_x_zeta) * (acc_x_zeta - pks_x_zeta), acc_x_poly);
-        a1_lin += (Fr::one() - b_zeta, acc_y_poly);
+        a1_lin += (F::one() - b_zeta, acc_y_poly);
         // a1_lin = zeta_minus_omega_inv * a1_lin // TODO: fix in arkworks
-        a1_lin.coeffs.iter_mut().for_each(|c| *c *= zeta_minus_omega_inv);
+        a1_lin.coeffs.iter_mut().for_each(|mut c| *c *= zeta_minus_omega_inv);
 
-        let mut a2_lin = DensePolynomial::<Fr>::zero();
+        let mut a2_lin = DensePolynomial::<F>::zero();
         a2_lin += (b_zeta * (acc_x_zeta - pks_x_zeta), acc_y_poly);
         a2_lin += (b_zeta * (acc_y_zeta - pks_y_zeta), acc_x_poly);
-        a2_lin += (Fr::one() - b_zeta, acc_x_poly);
+        a2_lin += (F::one() - b_zeta, acc_x_poly);
         // a2_lin = zeta_minus_omega_inv * a2_lin // TODO: fix in arkworks
-        a2_lin.coeffs.iter_mut().for_each(|c| *c *= zeta_minus_omega_inv);
+        a2_lin.coeffs.iter_mut().for_each(|mut c| *c *= zeta_minus_omega_inv);
 
         vec![
             a1_lin,
             a2_lin,
-            DensePolynomial::zero(),
-            DensePolynomial::zero(),
-            DensePolynomial::zero(),
+            DensePolynomial::<F>::zero(),
+            DensePolynomial::<F>::zero(),
+            DensePolynomial::<F>::zero(),
         ]
     }
 
-    pub fn compute_constraint_polynomials(&self) -> Vec<DensePolynomial<Fr>> {
+    pub fn compute_constraint_polynomials<IC, OC>(&self) -> Vec<DensePolynomial<F>> 
+where 
+    IC: CurveGroup,
+    OC: CurveGroup<ScalarField = F>,
+    OC::ScalarField: From<IC::BaseField>,
+{
         let (a1_poly, a2_poly) =
-            Constraints::compute_conditional_affine_addition_constraint_polynomials(self);
+            Constraints::<IC, OC>::compute_conditional_affine_addition_constraint_polynomials(self);
         let a3_poly =
-            Constraints::compute_bitmask_booleanity_constraint_polynomial(self);
+            Constraints::<IC, OC>::compute_bitmask_booleanity_constraint_polynomial(self);
         let (a4_poly, a5_poly) =
-            Constraints::compute_public_inputs_constraint_polynomials(self);
+            Constraints::<IC, OC>::compute_public_inputs_constraint_polynomials(self);
         vec![a1_poly, a2_poly, a3_poly, a4_poly, a5_poly]
     }
 
-    pub fn get_register_polynomials(&self) -> AffineAdditionPolynomials {
+    pub fn get_register_polynomials(&self) -> AffineAdditionPolynomials<F> {
         self.polynomials.clone()
     }
 
-    pub fn get_partial_sums_and_bitmask_polynomials(&self) -> PartialSumsAndBitmaskPolynomials {
+    pub fn get_partial_sums_and_bitmask_polynomials(&self) -> PartialSumsAndBitmaskPolynomials<F> {
         let polys = self.get_register_polynomials();
         PartialSumsAndBitmaskPolynomials {
             partial_sums: polys.partial_sums,
@@ -297,24 +330,37 @@ impl AffineAdditionRegisters {
     }
 }
 
-pub(crate) struct Constraints {}
+pub(crate) struct Constraints<IC, OC> 
+where 
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
+{
+    _ic: PhantomData<IC>,
+    _oc: PhantomData<OC>,
+}
 
-impl Constraints {
-    pub fn compute_bitmask_booleanity_constraint_polynomial(registers: &AffineAdditionRegisters) -> DensePolynomial<Fr> {
+impl<IC, OC> Constraints<IC, OC> 
+where 
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
+{
+    pub fn compute_bitmask_booleanity_constraint_polynomial(registers: &AffineAdditionRegisters<OC::ScalarField>) -> DensePolynomial<OC::ScalarField> {
         let b = &registers.bitmask;
-        let mut one_minus_b = registers.domains.constant_4x(Fr::one());
+        let mut one_minus_b = registers.domains.constant_4x(OC::ScalarField::one());
         one_minus_b -= b;
         (b * &one_minus_b).interpolate()
     }
 
-    pub fn evaluate_bitmask_booleanity_constraint(bitmask_at_zeta: Fr) -> Fr {
-        bitmask_at_zeta * (Fr::one() - bitmask_at_zeta)
+    pub fn evaluate_bitmask_booleanity_constraint(bitmask_at_zeta: OC::ScalarField) -> OC::ScalarField {
+        bitmask_at_zeta * (OC::ScalarField::one() - bitmask_at_zeta)
     }
 
-    pub fn compute_conditional_affine_addition_constraint_polynomials(registers: &AffineAdditionRegisters) ->
-    (DensePolynomial<Fr>, DensePolynomial<Fr>) {
+    pub fn compute_conditional_affine_addition_constraint_polynomials(registers: &AffineAdditionRegisters<OC::ScalarField>) ->
+    (DensePolynomial<OC::ScalarField>, DensePolynomial<OC::ScalarField>) {
         let b = &registers.bitmask;
-        let mut one_minus_b = registers.domains.constant_4x(Fr::one());
+        let mut one_minus_b = registers.domains.constant_4x(OC::ScalarField::one());
         one_minus_b -= b;
 
         let [x1, y1] = &registers.partial_sums;
@@ -372,45 +418,45 @@ impl Constraints {
         (a1_poly_, a2_poly_)
     }
 
-    pub fn evaluate_conditional_affine_addition_constraints(
-        zeta_minus_omega_inv: Fr,
-        b: Fr,
-        x1: Fr,
-        y1: Fr,
-        x2: Fr,
-        y2: Fr,
-        x3: Fr,
-        y3: Fr,
-    ) -> (Fr, Fr) {
+    pub fn evaluate_conditional_affine_addition_constraints<F: FftField>(
+        zeta_minus_omega_inv: F,
+        b: F,
+        x1: F,
+        y1: F,
+        x2: F,
+        y2: F,
+        x3: F,
+        y3: F,
+    ) -> (F, F) {
         let c1 =
             b * (
                 (x1 - x2) * (x1 - x2) * (x1 + x2 + x3)
                     - (y2 - y1) * (y2 - y1)
-            ) + (Fr::one() - b) * (y3 - y1);
+            ) + (F::one() - b) * (y3 - y1);
 
         let c2 =
             b * (
                 (x1 - x2) * (y3 + y1)
                     - (y2 - y1) * (x3 - x1)
-            ) + (Fr::one() - b) * (x3 - x1);
+            ) + (F::one() - b) * (x3 - x1);
 
         (c1 * zeta_minus_omega_inv, c2 * zeta_minus_omega_inv)
     }
 
-    pub fn evaluate_conditional_affine_addition_constraints_linearized(
-        zeta_minus_omega_inv: Fr,
-        b: Fr,
-        x1: Fr,
-        y1: Fr,
-        x2: Fr,
-        y2: Fr,
-    ) -> (Fr, Fr) {
-        Self::evaluate_conditional_affine_addition_constraints(zeta_minus_omega_inv, b, x1, y1, x2, y2, Fr::zero(), Fr::zero())
+    pub fn evaluate_conditional_affine_addition_constraints_linearized<F: FftField>(
+        zeta_minus_omega_inv: F,
+        b: F,
+        x1: F,
+        y1: F,
+        x2: F,
+        y2: F,
+    ) -> (F, F) {
+        Self::evaluate_conditional_affine_addition_constraints(zeta_minus_omega_inv, b, x1, y1, x2, y2, F::zero(), F::zero())
     }
 
     // TODO: better name
-    pub fn compute_public_inputs_constraint_polynomials(registers: &AffineAdditionRegisters) ->
-    (DensePolynomial<Fr>, DensePolynomial<Fr>) {
+    pub fn compute_public_inputs_constraint_polynomials (registers: &AffineAdditionRegisters<OC::ScalarField>) ->
+    (DensePolynomial<OC::ScalarField>, DensePolynomial<OC::ScalarField>) {
         let [x1, y1] = &registers.partial_sums;
         let [h_x, h_y] = [x1, y1].map(|z| z[0]);
         let [apk_plus_h_x, apk_plus_h_y] = [x1, y1].map(|z| z[4 * (registers.domains.size - 1)]);
@@ -432,16 +478,21 @@ impl Constraints {
         (a4_poly, a5_poly)
     }
 
+    // pub fn evaluate_public_inputs_constraints<F: FftField, Affine: AffineRepr<BaseField = F> + std::borrow::Borrow<ark_ec::short_weierstrass::Affine<P>>, P: SWCurveConfig>(
     pub fn evaluate_public_inputs_constraints(
-        apk: ark_bls12_377::G1Affine,
-        evals_at_zeta: &LagrangeEvaluations<Fr>,
-        x1: Fr,
-        y1: Fr,
-    ) -> (Fr, Fr) {
-        let h = point_in_g1_complement();
+        // apk: ark_bls12_377::G1Affine,
+        apk: IC::Affine,
+        evals_at_zeta: &LagrangeEvaluations<OC::ScalarField>,
+        x1: OC::ScalarField,
+        y1: OC::ScalarField,
+    ) -> (OC::ScalarField, OC::ScalarField) {
+        let h = point_in_g1_complement_g::<IC>().into_affine();
         let apk_plus_h = (h + apk).into_affine();
-        let c1 = (x1 - h.x) * evals_at_zeta.l_first + (x1 - apk_plus_h.x) * evals_at_zeta.l_last;
-        let c2 = (y1 - h.y) * evals_at_zeta.l_first + (y1 - apk_plus_h.y) * evals_at_zeta.l_last;
+        let (h_x, h_y): (OC::ScalarField, OC::ScalarField) = h.xy().map(|(x, y)| ((*x).into(), (*y).into())).expect("invalid point");
+        let (apk_plus_h_x, apk_plus_h_y): (OC::ScalarField, OC::ScalarField) = apk_plus_h.xy().map(|(x, y)| ((*x).into(), (*y).into())).expect("invalid point");
+
+        let c1 = (x1 - h_x) * evals_at_zeta.l_first + (x1 - apk_plus_h_x) * evals_at_zeta.l_last;
+        let c2 = (y1 - h_y) * evals_at_zeta.l_first + (y1 - apk_plus_h_y) * evals_at_zeta.l_last;
         (c1, c2)
     }
 }
@@ -459,10 +510,13 @@ mod tests {
     use ark_ec::CurveGroup;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
+    use rand::Rng;
 
     use crate::test_helpers::{_random_bitmask, _random_bits, random_pks};
     use crate::utils;
 
+    use ark_bls12_377::{G1Projective as InnerCurve, Bls12_377};
+    use ark_bw6_761::{Fr, G1Affine, BW6_761, G1Projective as OuterCurve};
     use super::*;
 
     fn dummy_registers(n: usize) -> [Vec<Fr>; 2] {
@@ -474,10 +528,11 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
         let m = n - 1;
-        let domains = Domains::new(n);
+        let domains = DomainsGeneric::new(n);
 
         let good_bitmask = _random_bits(m, 0.5, rng);
-        let mut keyset = Keyset::new(random_pks(m, rng));
+        let pks: Vec<InnerCurve> = random_pks::<_, InnerCurve>(m, rng);
+        let mut keyset = KeysetGeneric::<InnerCurve, OuterCurve>::new(pks);
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(
             domains.clone(),
@@ -485,17 +540,17 @@ mod tests {
             &good_bitmask,
         );
         let constraint_poly =
-            Constraints::compute_bitmask_booleanity_constraint_polynomial(&registers);
+            Constraints::<InnerCurve, OuterCurve>::compute_bitmask_booleanity_constraint_polynomial(&registers);
         assert_eq!(constraint_poly.degree(), 2 * (n - 1));
         assert!(domains.is_zero(&constraint_poly));
         let zeta = Fr::rand(rng);
         let bitmask_at_zeta = registers.get_register_polynomials().bitmask.evaluate(&zeta);
         assert_eq!(
-            Constraints::evaluate_bitmask_booleanity_constraint(bitmask_at_zeta),
+            Constraints::<InnerCurve, OuterCurve>::evaluate_bitmask_booleanity_constraint(bitmask_at_zeta),
             constraint_poly.evaluate(&zeta)
         );
 
-        let mut bad_bitmask = _random_bitmask(m, rng);
+        let mut bad_bitmask = _random_bitmask::<_,ark_bw6_761::G1Projective>(m, rng);
         bad_bitmask[0] = Fr::rand(rng);
 
         let registers = AffineAdditionRegisters::new_unchecked(
@@ -505,7 +560,7 @@ mod tests {
             dummy_registers(n),
         );
         let constraint_poly =
-            Constraints::compute_bitmask_booleanity_constraint_polynomial(&registers);
+            Constraints::<InnerCurve, OuterCurve>::compute_bitmask_booleanity_constraint_polynomial(&registers);
         assert_eq!(constraint_poly.degree(), 2 * (n - 1));
         assert!(!domains.is_zero(&constraint_poly));
     }
@@ -515,9 +570,9 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
         let m = n - 1;
-        let domains = Domains::new(n);
+        let domains = DomainsGeneric::new(n);
 
-        let mut keyset = Keyset::new(random_pks(m, rng));
+        let mut keyset = KeysetGeneric::<InnerCurve, OuterCurve>::new(random_pks(m, rng));
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(
             domains.clone(),
@@ -525,7 +580,7 @@ mod tests {
             &_random_bits(m, 0.5, rng),
         );
         let constraint_polys =
-            Constraints::compute_conditional_affine_addition_constraint_polynomials(&registers);
+            Constraints::<InnerCurve, OuterCurve>::compute_conditional_affine_addition_constraint_polynomials(&registers);
         assert_eq!(constraint_polys.0.degree(), 4 * n - 3);
         assert_eq!(constraint_polys.1.degree(), 3 * n - 2);
         assert!(domains.is_zero(&constraint_polys.0));
@@ -539,11 +594,11 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
         let m = n - 1;
-        let domains = Domains::new(n);
+        let domains = DomainsGeneric::new(n);
 
         let bits = _random_bits(m, 0.5, rng);
 
-        let mut keyset = Keyset::new(random_pks(m, rng));
+        let mut keyset = KeysetGeneric::<InnerCurve, OuterCurve>::new(random_pks(m, rng));
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(
             domains.clone(),
@@ -551,7 +606,7 @@ mod tests {
             &bits,
         );
         let constraint_polys =
-            Constraints::compute_public_inputs_constraint_polynomials(&registers);
+            Constraints::<InnerCurve, OuterCurve>::compute_public_inputs_constraint_polynomials(&registers);
         assert_eq!(constraint_polys.0.degree(), 2 * n - 2);
         assert_eq!(constraint_polys.1.degree(), 2 * n - 2);
         assert!(domains.is_zero(&constraint_polys.0));
@@ -563,7 +618,7 @@ mod tests {
         let acc_polys = registers.get_register_polynomials().partial_sums;
         let (x1, y1) = (acc_polys[0].evaluate(&zeta), acc_polys[1].evaluate(&zeta));
         assert_eq!(
-            Constraints::evaluate_public_inputs_constraints(apk, &evals_at_zeta, x1, y1),
+            Constraints::<InnerCurve, OuterCurve>::evaluate_public_inputs_constraints(apk, &evals_at_zeta, x1, y1),
             (constraint_polys.0.evaluate(&zeta), constraint_polys.1.evaluate(&zeta))
         );
 

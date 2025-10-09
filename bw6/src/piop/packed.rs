@@ -1,26 +1,36 @@
 use ark_bw6_761::Fr;
+use ark_ec::pairing::Pairing;
+use ark_ec::{AffineRepr, CurveGroup};
+use ark_ff::{FftField, PrimeField};
 use ark_poly::polynomial::univariate::DensePolynomial;
+use fflonk::pcs::PCS;
 
-use crate::{AccountablePublicInput, Bitmask, Keyset, utils};
-use crate::domains::Domains;
+use crate::{utils, AccountablePublicInput, Bitmask, Keyset, KeysetGeneric, PublicInput};
+use crate::domains::{Domains, DomainsGeneric};
 use crate::piop::affine_addition::{AffineAdditionRegisters, PartialSumsAndBitmaskPolynomials};
 use crate::piop::bitmask_packing::{BitmaskPackingPolynomials, BitmaskPackingRegisters, SuccinctAccountableRegisterEvaluations};
 use crate::piop::ProverProtocol;
 
-pub struct PackedRegisterBuilder {
+pub struct PackedRegisterBuilder<F: PrimeField> {
     bitmask: Bitmask,
-    affine_addition_registers: AffineAdditionRegisters,
-    bitmask_packing_registers: Option<BitmaskPackingRegisters>,
-    register_evaluations: Option<SuccinctAccountableRegisterEvaluations>,
+    affine_addition_registers: AffineAdditionRegisters<F>,
+    bitmask_packing_registers: Option<BitmaskPackingRegisters<F>>,
+    register_evaluations: Option<SuccinctAccountableRegisterEvaluations<F>>,
 }
 
-impl ProverProtocol for PackedRegisterBuilder {
-    type P1 = PartialSumsAndBitmaskPolynomials;
-    type P2 = BitmaskPackingPolynomials;
-    type E = SuccinctAccountableRegisterEvaluations;
-    type PI = AccountablePublicInput;
+impl<IC, OC, S> ProverProtocol<IC, OC, S> for PackedRegisterBuilder<OC::ScalarField> 
+where 
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField> + FftField,
+    S: PCS<OC::ScalarField>,
+{
+    type P1 = PartialSumsAndBitmaskPolynomials<OC::ScalarField>;
+    type P2 = BitmaskPackingPolynomials<OC::ScalarField>;
+    type E = SuccinctAccountableRegisterEvaluations<OC::ScalarField>;
+    type PI = AccountablePublicInput<IC>;
 
-    fn init(domains: Domains, bitmask: Bitmask, keyset: Keyset) -> Self {
+    fn init(domains: DomainsGeneric<OC::ScalarField>, bitmask: Bitmask, keyset: KeysetGeneric<IC, OC>) -> Self {
         PackedRegisterBuilder {
             bitmask: bitmask.clone(),
             affine_addition_registers: AffineAdditionRegisters::new(domains, keyset, &bitmask.to_bits()),
@@ -29,12 +39,12 @@ impl ProverProtocol for PackedRegisterBuilder {
         }
     }
 
-    fn get_register_polynomials_to_commit1(&self) -> PartialSumsAndBitmaskPolynomials {
+    fn get_register_polynomials_to_commit1(&self) -> PartialSumsAndBitmaskPolynomials<OC::ScalarField> {
         self.affine_addition_registers.get_partial_sums_and_bitmask_polynomials()
     }
 
 
-    fn get_register_polynomials_to_commit2(&mut self, bitmask_chunks_aggregation_challenge: Fr) -> BitmaskPackingPolynomials {
+    fn get_register_polynomials_to_commit2(&mut self, bitmask_chunks_aggregation_challenge: OC::ScalarField) -> BitmaskPackingPolynomials<OC::ScalarField> {
         let bitmask_packing_registers = BitmaskPackingRegisters::new(
             self.affine_addition_registers.domains.clone(),
             &self.bitmask,
@@ -45,7 +55,7 @@ impl ProverProtocol for PackedRegisterBuilder {
         res
     }
 
-    fn get_register_polynomials_to_open(self) -> Vec<DensePolynomial<Fr>> {
+    fn get_register_polynomials_to_open(self) -> Vec<DensePolynomial<OC::ScalarField>> {
         let affine_addition_polys = self.affine_addition_registers.get_register_polynomials().to_vec();
         let bitmask_packing_polys = self.bitmask_packing_registers.unwrap().get_register_polynomials().to_vec();
         let mut polys = vec![];
@@ -54,8 +64,8 @@ impl ProverProtocol for PackedRegisterBuilder {
         polys
     }
 
-    fn compute_constraint_polynomials(&self) -> Vec<DensePolynomial<Fr>> {
-        let affine_addition_constraints = self.affine_addition_registers.compute_constraint_polynomials();
+    fn compute_constraint_polynomials(&self) -> Vec<DensePolynomial<OC::ScalarField>> {
+        let affine_addition_constraints = self.affine_addition_registers.compute_constraint_polynomials::<IC, OC>();
         let bitmask_packing_constraints = self.bitmask_packing_registers.as_ref().unwrap().compute_constraint_polynomials();
         let mut constraints = vec![];
         constraints.extend(affine_addition_constraints);
@@ -63,7 +73,7 @@ impl ProverProtocol for PackedRegisterBuilder {
         constraints
     }
 
-    fn evaluate_register_polynomials(&mut self, point: Fr) -> SuccinctAccountableRegisterEvaluations {
+    fn evaluate_register_polynomials(&mut self, point: OC::ScalarField) -> SuccinctAccountableRegisterEvaluations<OC::ScalarField> {
         let affine_addition_evals = self.affine_addition_registers.evaluate_register_polynomials(point);
         let bitmask_packing_evals = self.bitmask_packing_registers.as_ref().unwrap().evaluate_register_polynomials(point);
         let evals = SuccinctAccountableRegisterEvaluations {
@@ -75,7 +85,7 @@ impl ProverProtocol for PackedRegisterBuilder {
         evals
     }
 
-    fn compute_linearization_polynomial(&self, phi: Fr, zeta: Fr) -> DensePolynomial<Fr> {
+    fn compute_linearization_polynomial(&self, phi: OC::ScalarField, zeta: OC::ScalarField) -> DensePolynomial<OC::ScalarField> {
         let evals = self.register_evaluations.as_ref().unwrap();
 
         let affine_addition_parts =
