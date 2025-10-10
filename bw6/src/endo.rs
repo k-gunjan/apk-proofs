@@ -40,10 +40,17 @@ pub fn subgroup_check<C: BW6Config>(p: &G1Projective<C>, omega: C::Fp, u: &[u64]
 #[cfg(test)]
 mod tests {
     use ark_bw6_761::{Config, Fr, Fq, G1Affine};
-    use ark_ec::{AffineRepr, CurveGroup};
+    use ark_ec::{bls12::Bls12Config, AffineRepr, CurveGroup};
     use ark_ff::{Field, MontFp, One};
     use ark_std::{test_rng, UniformRand};
-    use crate::{OMEGA, U};
+
+    pub const U: &'static [u64] = ark_bls12_377::Config::X;
+
+    pub const OMEGA: Fq = MontFp!(
+        "196898582409020929727861073970057715139766638230382572845074161156680037021882725775086501\
+        3421937292370006175842381275743914023380727582819905021229583192207421122272650305267822868\
+        639090213645505120388400344940985710520836292650"
+);
 
     use super::*;
 

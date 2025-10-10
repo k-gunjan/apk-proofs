@@ -1,11 +1,12 @@
 use ark_ec::CurveGroup;
-use ark_ec::{pairing::Pairing, AffineRepr};
+use ark_ec::AffineRepr;
+use ark_ff::PrimeField;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use fflonk::pcs::Commitment;
 use fflonk::pcs::{CommitterKey, PCS};
-use fflonk::pcs::kzg::{params::KzgCommitterKey, KZG};
-
+use std::marker::PhantomData;
 use crate::hash_to_curve;
 use crate::domains::DomainsGeneric;
 
@@ -28,55 +29,63 @@ use crate::domains::DomainsGeneric;
 // computes the commitment using the right parameters, and then sign it.
 // Verifier checks the signatures and can trust that the properties hold under some "2/3 honest validators" assumption.
 // As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
+
+// The commitment type is generic over different PCS implementations. To extract the 
+// underlying curve point, access the specific implementation's inner field. For example,
+// KzgCommitment<E: Pairing> wraps the point as `pub struct KzgCommitment(pub E::G1Affine)`,
+// so the affine coordinates can be accessed via the `.0` field accessor.
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct KeysetCommitment<OuterCurve>
+pub struct KeysetCommitment<F,C>
 where
-    OuterCurve: Pairing,
+    F: PrimeField,
+    C: Commitment<F>,
 {
-    /// Per-coordinate KZG commitments to public key polynomials
-    pub pks_comm: (OuterCurve::G1Affine, OuterCurve::G1Affine),
+    /// Per-coordinate commitments to public key polynomials
+    pub pks_comm: (C, C),
     /// Log₂ of the domain size used to interpolate the vectors above.
     pub log_domain_size: u32,
+    _m: PhantomData<F>,
 }
 
 type EvaluationsX4<Field> = Evaluations<Field, Radix2EvaluationDomain<Field>>;
 
 #[derive(Clone)]
-pub struct Keyset<InnerCurve, OuterCurve>
+pub struct Keyset<IC, OC>
 where
-    InnerCurve: Pairing,
-    OuterCurve: Pairing,
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
 {
     // Actual public keys, no padding.
-    pub pks: Vec<InnerCurve::G1>,
+    pub pks: Vec<IC>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
-    pub pks_polys: [DensePolynomial<OuterCurve::ScalarField>; 2],
+    pub pks_polys: [DensePolynomial<OC::ScalarField>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<OuterCurve::ScalarField>,
+    pub domain: Radix2EvaluationDomain<OC::ScalarField>,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
-    pub pks_evals_x4: Option<[EvaluationsX4<OuterCurve::ScalarField>; 2]>,
+    pub pks_evals_x4: Option<[EvaluationsX4<OC::ScalarField>; 2]>,
 }
 
-impl<InnerCurve, OuterCurve> Keyset<InnerCurve, OuterCurve>
+impl<IC, OC> Keyset<IC, OC>
 where
-    InnerCurve: Pairing,
-    OuterCurve: Pairing,
-    <<InnerCurve as Pairing>::G1Affine as AffineRepr>::BaseField: Into<OuterCurve::ScalarField>,
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
 {
-    pub fn new(pks: Vec<InnerCurve::G1>) -> Self {
+    pub fn new(pks: Vec<IC>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain: Radix2EvaluationDomain<OuterCurve::ScalarField> =
-            Radix2EvaluationDomain::<OuterCurve::ScalarField>::new(min_domain_size)
+        let domain: Radix2EvaluationDomain<OC::ScalarField> =
+            Radix2EvaluationDomain::<OC::ScalarField>::new(min_domain_size)
                 .expect("Failed to create evaluation domain");
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
-        let padding_pk = hash_to_curve::<InnerCurve::G1>(b"apk-proofs");
+        let padding_pk = hash_to_curve::<IC>(b"apk-proofs");
         padded_pks.resize(domain.size(), padding_pk);
 
         // convert into affine coordinates to commit
-        let affine_pks = InnerCurve::G1::normalize_batch(&padded_pks);
+        let affine_pks = IC::normalize_batch(&padded_pks);
         let mut pks_x = Vec::with_capacity(affine_pks.len());
         let mut pks_y = Vec::with_capacity(affine_pks.len());
 
@@ -109,20 +118,24 @@ where
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
-    pub fn commit(
+    pub fn commit<S>(
         &self,
-        kzg_pk: &KzgCommitterKey<OuterCurve::G1Affine>,
-    ) -> KeysetCommitment<OuterCurve> {
+        kzg_pk: &S::CK,
+    ) -> KeysetCommitment<OC::ScalarField, S::C> 
+    where 
+        S: PCS<OC::ScalarField>
+    {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
-        let pks_x_comm = KZG::<OuterCurve>::commit(kzg_pk, &self.pks_polys[0]).0;
-        let pks_y_comm = KZG::<OuterCurve>::commit(kzg_pk, &self.pks_polys[1]).0;
+        let pks_x_comm = S::commit(kzg_pk, &self.pks_polys[0]);
+        let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]);
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,
+            _m: PhantomData::default(),
         }
     }
 
-    pub fn aggregate(&self, bitmask: &[bool]) -> InnerCurve::G1 {
+    pub fn aggregate(&self, bitmask: &[bool]) -> IC {
         assert_eq!(bitmask.len(), self.size());
         bitmask
             .iter()

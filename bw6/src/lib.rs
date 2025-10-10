@@ -1,16 +1,18 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
-
-use ark_bls12_377::G1Affine;
-use ark_bw6_761::{BW6_761, Fr, Fq};
-use ark_ec::CurveGroup;
-use ark_ff::MontFp;
+use ark_ec::pairing::Pairing;
+use ark_std::{One, Zero};
+use ark_bw6_761::{Fq, Fr, BW6_761};
+use ark_ec::short_weierstrass::{Affine, SWCurveConfig};
+use ark_ec::{AffineRepr, CurveGroup};
+use ark_ff::{FftField, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use fflonk::pcs::kzg::commitment::KzgCommitment;
 use fflonk::pcs::kzg::KZG;
 
 pub use bitmask::Bitmask;
-pub use keyset::{Keyset as KeysetGeneric, KeysetCommitment as KeysetCommitmentGeneric};
+pub use keyset::{Keyset, KeysetCommitment};
 
-use crate::piop::{RegisterCommitments, RegisterEvaluations};
+use crate::piop::RegisterEvaluations;
 use crate::piop::affine_addition::{PartialSumsAndBitmaskCommitments, PartialSumsCommitments};
 use crate::piop::basic::AffineAdditionEvaluationsWithoutBitmask;
 use crate::piop::bitmask_packing::{BitmaskPackingCommitments, SuccinctAccountableRegisterEvaluations};
@@ -37,38 +39,44 @@ mod bitmask;
 mod keyset;
 pub mod test_helpers; //TODO: cfgtest
 
-type NewKzgBw6 = KZG<BW6_761>;
+/// Trait to extract the underlying curve point from a type e.g. commitment and get it back.
+pub trait CommitmentExt<F: PrimeField> {
+    type Affine: AffineRepr<ScalarField = F>;
+    
+    /// Extract the underlying affine point
+    fn to_affine(&self) -> Self::Affine;
 
-/// Type alias for standard BLS12-377/BW6-761 combination
-pub type Keyset = KeysetGeneric<ark_bls12_377::Bls12_377, BW6_761>;
+    /// Construct the commitment from an affine point
+    fn from_affine(p: Self::Affine) ->Self;
+}
 
-/// Default type alias for Keyset commitment over BW6-761
-pub type KeysetCommitment = KeysetCommitmentGeneric<BW6_761>;
+impl<E: Pairing> CommitmentExt<E::ScalarField> for KzgCommitment<E> {
+    type Affine = E::G1Affine;
+    
+    fn to_affine(&self) -> Self::Affine {
+        self.0
+    }
 
-pub const OMEGA: Fq = MontFp!(
-        "196898582409020929727861073970057715139766638230382572845074161156680037021882725775086501\
-        3421937292370006175842381275743914023380727582819905021229583192207421122272650305267822868\
-        639090213645505120388400344940985710520836292650"
-);
-
-use ark_ec::bls12::Bls12Config;
-pub const U: &'static [u64] = ark_bls12_377::Config::X;
+    fn from_affine(p: Self::Affine) ->Self {
+        KzgCommitment(p)
+    }
+}
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones
-pub trait PublicInput : CanonicalSerialize + CanonicalDeserialize {
-    fn new(apk: &G1Affine, bitmask: &Bitmask) -> Self;
+pub trait PublicInput<C: CurveGroup> : CanonicalSerialize + CanonicalDeserialize {
+    fn new(apk: &C::Affine, bitmask: &Bitmask) -> Self;
 }
 
 // Used in 'basic' and 'packed' schemes
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct AccountablePublicInput {
-    pub apk: G1Affine,
+pub struct AccountablePublicInput<C: CurveGroup> {
+    pub apk: C::Affine,
     pub bitmask: Bitmask,
 }
 
-impl PublicInput for AccountablePublicInput {
-    fn new(apk: &G1Affine, bitmask: &Bitmask) -> Self {
+impl<C: CurveGroup> PublicInput<C> for AccountablePublicInput<C> {
+    fn new(apk: &C::Affine, bitmask: &Bitmask) -> Self {
         AccountablePublicInput {
             apk: apk.clone(),
             bitmask: bitmask.clone(),
@@ -78,13 +86,13 @@ impl PublicInput for AccountablePublicInput {
 
 // Used in 'counting' scheme
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct CountingPublicInput {
-    pub apk: G1Affine,
+pub struct CountingPublicInput<C: CurveGroup> {
+    pub apk: C::Affine,
     pub count: usize,
 }
 
-impl PublicInput for CountingPublicInput {
-    fn new(apk: &G1Affine, bitmask: &Bitmask) -> Self {
+impl<C: CurveGroup> PublicInput<C> for CountingPublicInput<C> {
+    fn new(apk: &C::Affine, bitmask: &Bitmask) -> Self {
         CountingPublicInput {
             apk: apk.clone(),
             count: bitmask.count_ones(),
@@ -92,31 +100,114 @@ impl PublicInput for CountingPublicInput {
     }
 }
 
+/// Generic proof structure for APK proofs
+///
+/// Generic over:
+/// - `F`: Field type (scalar field of the outer curve)
+/// - `E`: Register evaluations type
+/// - `C`: First round register commitments type
+/// - `AC`: Second round additional commitments type (for packed scheme)
+/// - `Comm`: Commitment type (e.g., KzgCommitment)
+/// - `OProof`: Opening proof type (PCS-specific)
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
-pub struct Proof<E: RegisterEvaluations, C: RegisterCommitments, AC: RegisterCommitments> {
-    register_commitments: C,
-    // 2nd round commitments, used in "packed" scheme after get the bitmask aggregation challenge is received
-    additional_commitments: AC,
-    // Prover receives \phi, the constraint polynomials batching challenge, here
-    q_comm: ark_bw6_761::G1Affine,
-    // Prover receives \zeta, the evaluation point challenge, here
-    register_evaluations: E,
-    q_zeta: Fr,
-    r_zeta_omega: Fr,
-    // Prover receives \nu, the KZG opening batching challenge, here
-    w_at_zeta_proof: ark_bw6_761::G1Affine,
-    r_at_zeta_omega_proof: ark_bw6_761::G1Affine,
+pub struct Proof<F, E, C, AC, Comm, OProof>
+where
+    F: FftField,
+    E: RegisterEvaluations<F>,
+    C: CanonicalSerialize + CanonicalDeserialize,
+    AC: CanonicalSerialize + CanonicalDeserialize,
+    Comm: CanonicalSerialize + CanonicalDeserialize + Clone,
+    OProof: CanonicalSerialize + CanonicalDeserialize + Clone,
+{
+    /// First round register commitments
+    pub register_commitments: C,
+    /// Second round commitments (used in "packed" scheme after bitmask aggregation challenge)
+    pub additional_commitments: AC,
+    /// Quotient polynomial commitment (after receiving φ challenge)
+    pub q_comm: Comm,
+    /// Register polynomial evaluations at ζ
+    pub register_evaluations: E,
+    /// Quotient polynomial evaluation at ζ
+    pub q_zeta: F,
+    /// Linearization polynomial evaluation at ζω
+    pub r_zeta_omega: F,
+    /// Opening proof for aggregated polynomial at ζ
+    pub w_at_zeta_proof: OProof,
+    /// Opening proof for linearization polynomial at ζω
+    pub r_at_zeta_omega_proof: OProof,
 }
 
-pub type SimpleProof = Proof<AffineAdditionEvaluationsWithoutBitmask, PartialSumsCommitments, ()>;
-pub type PackedProof = Proof<SuccinctAccountableRegisterEvaluations, PartialSumsAndBitmaskCommitments, BitmaskPackingCommitments>;
-pub type CountingProof = Proof<CountingEvaluations, CountingCommitments, ()>;
+/// Simple proof type (basic scheme without bitmask packing)
+pub type SimpleProof<F, G, Comm, OProof> = Proof<
+    F,
+    AffineAdditionEvaluationsWithoutBitmask<F>,
+    PartialSumsCommitments<G>,
+    (),
+    Comm,
+    OProof,
+>;
 
+/// Packed proof type (with bitmask packing for succinctness)
+pub type PackedProof<F, G, Comm, OProof> = Proof<
+    F,
+    SuccinctAccountableRegisterEvaluations<F>,
+    PartialSumsAndBitmaskCommitments<G>,
+    BitmaskPackingCommitments<G>,
+    Comm,
+    OProof,
+>;
+/// Counting proof type (only proves count, not individual bits)
+pub type CountingProof<F, G, Comm, OProof> = Proof<
+    F,
+    CountingEvaluations<F>,
+    CountingCommitments<G>,
+    (),
+    Comm,
+    OProof,
+>;
 
-const H_X: Fr = MontFp!("0");
-const H_Y: Fr = MontFp!("1");
-fn point_in_g1_complement() -> ark_bls12_377::G1Affine {
-    ark_bls12_377::G1Affine::new_unchecked(H_X, H_Y)
+// Export oncrete type aliases
+pub type KeysetBls377 = Keyset<ark_bls12_377::Bls12_377, BW6_761>;
+pub type KeysetCommitmentBls377 = KeysetCommitment<Fr, KzgCommitment<BW6_761>>;
+
+pub type SimpleProofBW6_761 = SimpleProof<
+    Fr,
+    ark_bw6_761::G1Affine,
+    KzgCommitment<BW6_761>,
+    ark_bw6_761::G1Affine,
+>;
+
+pub type PackedProofBW6_761 = PackedProof<
+    Fr,
+    ark_bw6_761::G1Affine,
+    KzgCommitment<BW6_761>,
+    ark_bw6_761::G1Affine,
+>;
+
+pub type CountingProofBW6_761 = CountingProof<
+    Fr,
+    ark_bw6_761::G1Affine,
+    KzgCommitment<BW6_761>,
+    ark_bw6_761::G1Affine,
+>;
+
+// const H_X: Fr = MontFp!("0");
+// const H_Y: Fr = MontFp!("1");
+
+pub fn point_in_g1_complement<P: SWCurveConfig>() -> Affine<P> {
+    let h_x: P::BaseField = P::BaseField::zero();
+    let h_y: P::BaseField = P::BaseField::one();
+
+    Affine::<P>::new_unchecked(h_x, h_y)
+}
+
+// TODO: Generator + one should be in the group complement. better approach?
+pub fn point_in_g1_complement_g<C: CurveGroup>() ->C
+{
+    let mut h = C::zero();
+    let one = C::ScalarField::one();
+    h += C::generator() * one;
+    h
 }
 
 // TODO: switch to better hash to curve when available
@@ -136,8 +227,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn h_is_not_in_g1() {
-        let h = point_in_g1_complement();
+    fn h_is_not_in_g1_bw6() {
+        let h = point_in_g1_complement::<ark_bw6_761::g1::Config>();
+        assert!(h.is_on_curve());
+        assert!(!h.is_in_correct_subgroup_assuming_on_curve());
+    }
+
+     #[test]
+    fn h_is_not_in_g1_bls12() {
+        let h = point_in_g1_complement::<ark_bls12_377::g1::Config>();
         assert!(h.is_on_curve());
         assert!(!h.is_in_correct_subgroup_assuming_on_curve());
     }

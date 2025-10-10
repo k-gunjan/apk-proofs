@@ -1,14 +1,10 @@
-use ark_bw6_761::BW6_761;
-use ark_ec::CurveGroup;
+use ark_ec::{CurveGroup, pairing::Pairing};
 use ark_poly::{EvaluationDomain, Polynomial};
 use fflonk::pcs::{PCS, PcsParams};
-use fflonk::pcs::kzg::params::KzgCommitterKey;
-use fflonk::pcs::kzg::urs::URS;
 use merlin::Transcript;
 
-use crate::{AccountablePublicInput, Bitmask, CountingProof, CountingPublicInput, KeysetCommitment, NewKzgBw6, PackedProof, Proof, PublicInput, SimpleProof};
-use crate::domains::Domains;
-use crate::Keyset;
+use crate::{AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof};
+use crate::domains::DomainsGeneric;
 use crate::piop::basic::BasicRegisterBuilder;
 use crate::piop::counting::CountingScheme;
 use crate::piop::packed::PackedRegisterBuilder;
@@ -16,53 +12,92 @@ use crate::piop::ProverProtocol;
 use crate::piop::RegisterPolynomials;
 use crate::transcript::ApkTranscript;
 
-pub struct Prover {
-    domains: Domains,
-    keyset: Keyset,
-    kzg_pk: KzgCommitterKey<ark_bw6_761::G1Affine>,
-    preprocessed_transcript: Transcript, //TODO: should transcript be generic ?
+
+pub struct Prover<IC, OC, S>
+where
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
+    S: PCS<OC::ScalarField>,
+{
+    domains: DomainsGeneric<OC::ScalarField>,
+    keyset: Keyset<IC, OC>,
+    committer_key: S::CK,
+    preprocessed_transcript: Transcript,
 }
 
-
-impl Prover {
-
+impl<IC, OC, S> Prover<IC, OC, S> 
+where
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
+    S: PCS<OC::ScalarField>,
+    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine>
+{
     pub fn new(
-        mut keyset: Keyset,
-        keyset_comm: &KeysetCommitment,
+        mut keyset: Keyset<IC, OC>,
+        keyset_comm: &KeysetCommitment<OC::ScalarField, S::C>,
         // prover needs both KZG pk and vk, as it commits to the latter to bind the srs
-        kzg_params: URS<BW6_761>,
+        pcs_params: S::Params,
         mut empty_transcript: Transcript,
     ) -> Self {
-        let domains = Domains::new(keyset.domain.size());
+        let domains = DomainsGeneric::new(keyset.domain.size());
 
         // assert!(kzg_params.fits(keyset.domain.size())); // SRS contains enough elements
-        empty_transcript.set_protocol_params(&keyset.domain, &kzg_params.raw_vk());
-        // TODO: remove concrete type after Prover is generic over the curve
-        <Transcript as ApkTranscript<BW6_761>>::set_keyset_commitment(&mut empty_transcript, keyset_comm);
+        <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(&mut empty_transcript, &keyset.domain, &pcs_params.raw_vk());
+        <Transcript as ApkTranscript<OC::ScalarField>>::set_keyset_commitment(&mut empty_transcript, keyset_comm);
 
         keyset.amplify();
 
         Self {
             domains,
             keyset,
-            kzg_pk: kzg_params.ck(),
+            committer_key: pcs_params.ck(),
             preprocessed_transcript: empty_transcript,
         }
     }
 
-    pub fn prove_simple(&self, bitmask: Bitmask) -> (SimpleProof, AccountablePublicInput) {
-        self.prove::<BasicRegisterBuilder>(bitmask)
+    pub fn prove_simple(&self, bitmask: Bitmask) -> (
+        SimpleProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
+        AccountablePublicInput<IC>) {
+        self.prove::<BasicRegisterBuilder<OC::ScalarField>>(bitmask)
     }
 
-    pub fn prove_packed(&self, bitmask: Bitmask) -> (PackedProof, AccountablePublicInput) {
-        self.prove::<PackedRegisterBuilder>(bitmask)
+    pub fn prove_packed(
+        &self, 
+        bitmask: Bitmask
+    ) -> (
+        PackedProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
+        AccountablePublicInput<IC>
+    ) {
+        self.prove::<PackedRegisterBuilder<OC::ScalarField>>(bitmask)
     }
 
-    pub fn prove_counting(&self, bitmask: Bitmask) -> (CountingProof, CountingPublicInput) {
-        self.prove::<CountingScheme>(bitmask)
+
+        pub fn prove_counting(
+        &self, 
+        bitmask: Bitmask
+    ) -> (
+        CountingProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
+        CountingPublicInput<IC>
+    ) {
+        self.prove::<CountingScheme<OC::ScalarField>>(bitmask)
     }
 
-    fn prove<P: ProverProtocol>(&self, bitmask: Bitmask) -> (Proof<P::E, <P::P1 as RegisterPolynomials>::C, <P::P2 as RegisterPolynomials>::C>, P::PI)
+
+    fn prove<P>(&self, bitmask: Bitmask) -> (
+        Proof<
+            OC::ScalarField,
+            P::E,
+            <P::P1 as RegisterPolynomials<OC::Affine>>::C,
+            <P::P2 as RegisterPolynomials<OC::Affine>>::C,
+            S::C,
+            S::Proof,
+        >,
+        P::PI
+    )
+    where
+        P: ProverProtocol<IC, OC, S>,
     {
         assert_eq!(bitmask.size(), self.keyset.size());
         assert!(bitmask.count_ones() > 0); // as EC identity doesn't have and affine representation
@@ -71,45 +106,45 @@ impl Prover {
 
         let mut transcript = self.preprocessed_transcript.clone();
         let public_input = P::PI::new(&apk, &bitmask);
-        <Transcript as ApkTranscript<BW6_761>>::append_public_input(&mut transcript, &public_input);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_public_input(&mut transcript, &public_input);
 
         // 1. Compute and commit to the basic registers.
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
         let partial_sums_polynomials = protocol.get_register_polynomials_to_commit1();
         let partial_sums_commitments = partial_sums_polynomials.commit(
-            |p| NewKzgBw6::commit(&self.kzg_pk, &p).0
+            |p| S::commit(&self.committer_key, &p).to_affine()
         );
 
-         <Transcript as ApkTranscript<BW6_761>>::append_register_commitments(&mut transcript, &partial_sums_commitments);
+         <Transcript as ApkTranscript<OC::ScalarField>>::append_register_commitments(&mut transcript, &partial_sums_commitments);
 
         // 2. Receive bitmask aggregation challenge,
         // compute and commit to succinct accountability registers.
-        let r = <Transcript as ApkTranscript<BW6_761>>::get_bitmask_aggregation_challenge(&mut transcript);
+        let r = <Transcript as ApkTranscript<OC::ScalarField>>::get_bitmask_aggregation_challenge(&mut transcript);
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
         let acc_register_commitments = acc_register_polynomials.commit(
-            |p| NewKzgBw6::commit(&self.kzg_pk, &p).0
+            |p| S::commit(&self.committer_key, &p).to_affine()
         );
-        <Transcript as ApkTranscript<BW6_761>>::append_2nd_round_register_commitments(&mut transcript, &acc_register_commitments);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_2nd_round_register_commitments(&mut transcript, &acc_register_commitments);
 
         // 3. Receive constraint aggregation challenge,
         // compute and commit to the quotient polynomial.
-        let phi = <Transcript as ApkTranscript<BW6_761>>::get_constraints_aggregation_challenge(&mut transcript);
+        let phi = <Transcript as ApkTranscript<OC::ScalarField>>::get_constraints_aggregation_challenge(&mut transcript);
         let q_poly = protocol.compute_quotient_polynomial(phi, self.keyset.domain);
-        let q_comm = NewKzgBw6::commit(&self.kzg_pk, &q_poly).0;
-        <Transcript as ApkTranscript<BW6_761>>::append_quotient_commitment(&mut transcript, &q_comm);
+        let q_comm = S::commit(&self.committer_key, &q_poly);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_quotient_commitment(&mut transcript, &q_comm);
 
         // 4. Receive the evaluation point,
         // evaluate register polynomials and the quotient polynomial,
         // compute the linearization polynomial and evaluate it at the shifted evaluation point,
         // commit to all the evaluations.
-        let zeta = <Transcript as ApkTranscript<BW6_761>>::get_evaluation_point(&mut transcript);
+        let zeta = <Transcript as ApkTranscript<OC::ScalarField>>::get_evaluation_point(&mut transcript);
         let register_evaluations = protocol.evaluate_register_polynomials(zeta);
         let q_zeta = q_poly.evaluate(&zeta);
         let zeta_omega = zeta * self.keyset.domain.group_gen;
         let r_poly = protocol.compute_linearization_polynomial(phi, zeta);
         let r_zeta_omega = r_poly.evaluate(&zeta_omega);
-         <Transcript as ApkTranscript<BW6_761>>::append_evaluations(&mut transcript, &register_evaluations, &q_zeta, &r_zeta_omega);
+         <Transcript as ApkTranscript<OC::ScalarField>>::append_evaluations(&mut transcript, &register_evaluations, &q_zeta, &r_zeta_omega);
 
         // 5. Receive the polynomials aggregation challenge,
         // open the aggregated polynomial at the evaluation point,
@@ -117,10 +152,10 @@ impl Prover {
         // and commit to the opening proofs.
         let mut register_polynomials = protocol.get_register_polynomials_to_open();
         register_polynomials.push(q_poly);
-        let nus =  <Transcript as ApkTranscript<BW6_761>>::get_kzg_aggregation_challenges(&mut transcript, register_polynomials.len());
+        let nus =  <Transcript as ApkTranscript<OC::ScalarField>>::get_kzg_aggregation_challenges(&mut transcript, register_polynomials.len());
         let w_poly = fflonk::aggregation::single::aggregate_polys(&register_polynomials, &nus);
-        let w_at_zeta_proof = NewKzgBw6::open(&self.kzg_pk, &w_poly, zeta);
-        let r_at_zeta_omega_proof = NewKzgBw6::open(&self.kzg_pk, &r_poly, zeta_omega);
+        let w_at_zeta_proof = S::open(&self.committer_key, &w_poly, zeta);
+        let r_at_zeta_omega_proof = S::open(&self.committer_key, &r_poly, zeta_omega);
 
         // Finally, compose the proof.
         let proof = Proof {
