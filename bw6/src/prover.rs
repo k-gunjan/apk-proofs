@@ -4,7 +4,7 @@ use fflonk::pcs::{PCS, PcsParams};
 use merlin::Transcript;
 
 use crate::{AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof};
-use crate::domains::DomainsGeneric;
+use crate::domains::Domains;
 use crate::piop::basic::BasicRegisterBuilder;
 use crate::piop::counting::CountingScheme;
 use crate::piop::packed::PackedRegisterBuilder;
@@ -20,7 +20,7 @@ where
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
 {
-    domains: DomainsGeneric<OC::ScalarField>,
+    domains: Domains<OC::ScalarField>,
     keyset: Keyset<IC, OC>,
     committer_key: S::CK,
     preprocessed_transcript: Transcript,
@@ -41,7 +41,7 @@ where
         pcs_params: S::Params,
         mut empty_transcript: Transcript,
     ) -> Self {
-        let domains = DomainsGeneric::new(keyset.domain.size());
+        let domains = Domains::new(keyset.domain.size());
 
         // assert!(kzg_params.fits(keyset.domain.size())); // SRS contains enough elements
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(&mut empty_transcript, &keyset.domain, &pcs_params.raw_vk());

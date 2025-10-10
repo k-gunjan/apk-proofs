@@ -9,7 +9,7 @@ use ark_std::{end_timer, start_timer};
 use fflonk::pcs::PCS;
 
 use crate::{Bitmask, utils};
-use crate::domains::DomainsGeneric;
+use crate::domains::Domains;
 use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, PartialSumsAndBitmaskCommitments};
 use crate::utils::LagrangeEvaluations;
@@ -183,7 +183,7 @@ where
 
 
 pub(crate) struct BitmaskPackingRegisters<F: PrimeField> {
-    domains: DomainsGeneric<F>,
+    domains: Domains<F>,
 
     bitmask: Evaluations<F, Radix2EvaluationDomain<F>>,
     c: Evaluations<F, Radix2EvaluationDomain<F>>,
@@ -199,7 +199,7 @@ pub(crate) struct BitmaskPackingRegisters<F: PrimeField> {
 impl<F: PrimeField> BitmaskPackingRegisters<F> {
 
     // TODO: remove bitmask arg
-    pub fn new(domains: DomainsGeneric<F>,
+    pub fn new(domains: Domains<F>,
                bitmask: &Bitmask,
                bitmask_chunks_aggregation_challenge: F, // denoted 'r' in the write-ups
     ) -> Self {
@@ -236,7 +236,7 @@ impl<F: PrimeField> BitmaskPackingRegisters<F> {
     }
 
     fn new_unchecked(
-        domains: DomainsGeneric<F>,
+        domains: Domains<F>,
 
         bitmask: Vec<F>,
         c: Vec<F>,

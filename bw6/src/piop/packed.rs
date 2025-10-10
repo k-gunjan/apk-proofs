@@ -1,12 +1,10 @@
-use ark_bw6_761::Fr;
-use ark_ec::pairing::Pairing;
-use ark_ec::{AffineRepr, CurveGroup};
+use ark_ec::CurveGroup;
 use ark_ff::{FftField, PrimeField};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use fflonk::pcs::PCS;
 
-use crate::{utils, AccountablePublicInput, Bitmask, Keyset, KeysetGeneric, PublicInput};
-use crate::domains::{Domains, DomainsGeneric};
+use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
+use crate::domains::Domains;
 use crate::piop::affine_addition::{AffineAdditionRegisters, PartialSumsAndBitmaskPolynomials};
 use crate::piop::bitmask_packing::{BitmaskPackingPolynomials, BitmaskPackingRegisters, SuccinctAccountableRegisterEvaluations};
 use crate::piop::ProverProtocol;
@@ -30,7 +28,7 @@ where
     type E = SuccinctAccountableRegisterEvaluations<OC::ScalarField>;
     type PI = AccountablePublicInput<IC>;
 
-    fn init(domains: DomainsGeneric<OC::ScalarField>, bitmask: Bitmask, keyset: KeysetGeneric<IC, OC>) -> Self {
+    fn init(domains: Domains<OC::ScalarField>, bitmask: Bitmask, keyset: Keyset<IC, OC>) -> Self {
         PackedRegisterBuilder {
             bitmask: bitmask.clone(),
             affine_addition_registers: AffineAdditionRegisters::new(domains, keyset, &bitmask.to_bits()),

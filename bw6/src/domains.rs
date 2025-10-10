@@ -2,11 +2,8 @@ use ark_ff::{FftField, One, Zero};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_std::convert::TryInto;
-
-// TODO: remove this default
-pub type Domains = DomainsGeneric<ark_bw6_761::Fr>;
 #[derive(Clone)]
-pub struct DomainsGeneric<F: FftField> {
+pub struct Domains<F: FftField> {
     //TODO: remove pub
     pub domain: Radix2EvaluationDomain<F>,
     pub domain2x: Radix2EvaluationDomain<F>,
@@ -24,7 +21,7 @@ pub struct DomainsGeneric<F: FftField> {
     pub size: usize,
 }
 
-impl<F: FftField> DomainsGeneric<F> {
+impl<F: FftField> Domains<F> {
     pub fn new(domain_size: usize) -> Self {
         let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
         let domain2x = Radix2EvaluationDomain::<F>::new(2 * domain_size).unwrap();
@@ -35,7 +32,7 @@ impl<F: FftField> DomainsGeneric<F> {
         let l_first_evals_over_4x = Self::_amplify(l_first, domain, domain4x);
         let l_last_evals_over_4x = Self::_amplify(l_last, domain, domain4x);
 
-        DomainsGeneric {
+        Domains {
             domain,
             domain2x,
             domain4x,
@@ -237,7 +234,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
 
-        let domains = DomainsGeneric::new(n);
+        let domains = Domains::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
         let poly = domains.interpolate(evals.clone());
@@ -254,7 +251,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
 
-        let domains = DomainsGeneric::new(n);
+        let domains = Domains::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
         let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
@@ -275,7 +272,7 @@ mod tests {
         let mut c_ln = vec![Fr::zero(); n];
         c_ln[n - 1] = c;
 
-        let domains = DomainsGeneric::new(n);
+        let domains = Domains::new(n);
 
         assert_eq!(domains.l_last_scaled_by(c), domains.amplify(c_ln));
     }

@@ -4,8 +4,8 @@ use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::PCS;
 
-use crate::{utils, AccountablePublicInput, Bitmask, KeysetGeneric};
-use crate::domains::DomainsGeneric;
+use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
+use crate::domains::Domains;
 use crate::piop::{ProverProtocol, RegisterEvaluations};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials};
 
@@ -43,7 +43,7 @@ where
     type E = AffineAdditionEvaluationsWithoutBitmask<OC::ScalarField>;
     type PI = AccountablePublicInput<IC>;
 
-    fn init(domains: DomainsGeneric<OC::ScalarField>, bitmask: Bitmask, keyset: KeysetGeneric<IC, OC>) -> Self {
+    fn init(domains: Domains<OC::ScalarField>, bitmask: Bitmask, keyset: Keyset<IC, OC>) -> Self {
         BasicRegisterBuilder {
             registers:  AffineAdditionRegisters::<OC::ScalarField>::new(domains, keyset, &bitmask.to_bits()),
             register_evaluations: None,

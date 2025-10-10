@@ -6,7 +6,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::iter::once;
 
 use crate::Bitmask;
-use crate::domains::DomainsGeneric;
+use crate::domains::Domains;
 
 // This "gadget" is used in the 'counting' scheme to constraint the number of set bits in the bitmask.
 
@@ -29,20 +29,20 @@ use crate::domains::DomainsGeneric;
 // But we use the former check not to handle this case differently.
 
 pub(crate) struct BitCountingRegisters<F: PrimeField> {
-    domains: DomainsGeneric<F>,
+    domains: Domains<F>,
     bitmask: Vec<F>,
     partial_counts: DensePolynomial<F>,
 }
 
 impl<F: PrimeField> BitCountingRegisters<F> {
-    pub fn new(domains: DomainsGeneric<F>, bitmask: &Bitmask) -> Self {
+    pub fn new(domains: Domains<F>, bitmask: &Bitmask) -> Self {
         let mut bitmask = bitmask.to_bits_as_field_elements();
         bitmask.resize_with(domains.size, || F::zero());
         let partial_counts = Self::build_partial_counts_register(&bitmask);
         Self::new_unchecked(domains, bitmask, partial_counts)
     }
 
-    fn new_unchecked(domains: DomainsGeneric<F>,
+    fn new_unchecked(domains: Domains<F>,
                      bitmask: Vec<F>,
                      partial_counts: Vec<F>,
     ) -> Self {
@@ -206,7 +206,7 @@ mod tests {
     fn test_bit_counting_constraint() {
         let rng = &mut test_rng();
         let n = 16;
-        let domains = DomainsGeneric::<Fr>::new(n);
+        let domains = Domains::<Fr>::new(n);
 
         let bitmask = Bitmask::from_bits(&_random_bits(n, 2.0 / 3.0, rng));
         let count = Fr::from(bitmask.count_ones() as u32);
@@ -235,7 +235,7 @@ mod tests {
     fn test_bitmask_ends_with_zero_constraint() {
         let rng = &mut test_rng();
         let n = 16;
-        let domains = DomainsGeneric::<Fr>::new(n);
+        let domains = Domains::<Fr>::new(n);
         let domain = domains.domain;
 
         let bits = _random_bits(n, 2.0 / 3.0, rng);

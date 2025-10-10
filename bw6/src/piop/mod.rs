@@ -1,5 +1,3 @@
-// use ark_bw6_761::{Fr, G1Affine};
-use ark_ec::pairing::Pairing;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{Field, Zero};
 use ark_poly::Radix2EvaluationDomain;
@@ -7,8 +5,8 @@ use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::PCS;
 
-use crate::{utils, Bitmask, KeysetGeneric, PublicInput};
-use crate::domains::DomainsGeneric;
+use crate::{utils, Bitmask, Keyset, PublicInput};
+use crate::domains::Domains;
 
 pub mod affine_addition;
 pub mod bitmask_packing;
@@ -110,7 +108,7 @@ where
     type E: RegisterEvaluations<OC::ScalarField>;
     type PI: PublicInput<IC>;
 
-    fn init(domains: DomainsGeneric<OC::ScalarField>, bitmask: Bitmask, keyset: KeysetGeneric<IC, OC>) -> Self;
+    fn init(domains: Domains<OC::ScalarField>, bitmask: Bitmask, keyset: Keyset<IC, OC>) -> Self;
 
     // These 2 methods together return register polynomials the prover should commit to.
     // The 2nd one is used only in the "packed" scheme as it requires an additional challenge

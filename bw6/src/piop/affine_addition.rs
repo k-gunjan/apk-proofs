@@ -7,8 +7,8 @@ use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::PCS;
 
-use crate::{point_in_g1_complement_g, KeysetGeneric};
-use crate::domains::DomainsGeneric;
+use crate::{point_in_g1_complement_g, Keyset};
+use crate::domains::Domains;
 use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::utils::LagrangeEvaluations;
 
@@ -176,7 +176,7 @@ impl<F: FftField> AffineAdditionEvaluations<F>
 
 /// Register polynomials in evaluation form amplified to support degree 4n constraints
 pub struct AffineAdditionRegisters<F: FftField> {
-    pub domains: DomainsGeneric<F>,
+    pub domains: Domains<F>,
     bitmask: Evaluations<F, Radix2EvaluationDomain<F,>>,
     // public keys' coordinates
     keyset: [Evaluations<F, Radix2EvaluationDomain<F,>>; 2],
@@ -187,8 +187,8 @@ pub struct AffineAdditionRegisters<F: FftField> {
 }
 
 impl<F: FftField> AffineAdditionRegisters<F> {
-    pub fn new<IC, OC>(domains: DomainsGeneric<F>,
-               keyset: KeysetGeneric<IC, OC>,
+    pub fn new<IC, OC>(domains: Domains<F>,
+               keyset: Keyset<IC, OC>,
                bitmask: &[bool],
     ) -> Self 
 where
@@ -238,9 +238,9 @@ where
         )
     }
 
-    fn new_unchecked<IC, OC>(domains: DomainsGeneric<F>,
+    fn new_unchecked<IC, OC>(domains: Domains<F>,
                      bitmask: Vec<F>,
-                     keyset: KeysetGeneric<IC, OC>,
+                     keyset: Keyset<IC, OC>,
                      apk_acc: [Vec<F>; 2],
     ) -> Self 
 where
@@ -528,11 +528,11 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
         let m = n - 1;
-        let domains = DomainsGeneric::new(n);
+        let domains = Domains::new(n);
 
         let good_bitmask = _random_bits(m, 0.5, rng);
         let pks: Vec<InnerCurve> = random_pks::<_, InnerCurve>(m, rng);
-        let mut keyset = KeysetGeneric::<InnerCurve, OuterCurve>::new(pks);
+        let mut keyset = Keyset::<InnerCurve, OuterCurve>::new(pks);
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(
             domains.clone(),
@@ -570,9 +570,9 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
         let m = n - 1;
-        let domains = DomainsGeneric::new(n);
+        let domains = Domains::new(n);
 
-        let mut keyset = KeysetGeneric::<InnerCurve, OuterCurve>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<InnerCurve, OuterCurve>::new(random_pks(m, rng));
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(
             domains.clone(),
@@ -594,11 +594,11 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
         let m = n - 1;
-        let domains = DomainsGeneric::new(n);
+        let domains = Domains::new(n);
 
         let bits = _random_bits(m, 0.5, rng);
 
-        let mut keyset = KeysetGeneric::<InnerCurve, OuterCurve>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<InnerCurve, OuterCurve>::new(random_pks(m, rng));
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(
             domains.clone(),

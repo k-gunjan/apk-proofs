@@ -8,7 +8,7 @@ use fflonk::pcs::Commitment;
 use fflonk::pcs::{CommitterKey, PCS};
 use std::marker::PhantomData;
 use crate::hash_to_curve;
-use crate::domains::DomainsGeneric;
+use crate::domains::Domains;
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -110,7 +110,7 @@ where
     }
 
     pub fn amplify(&mut self) {
-        let domains = DomainsGeneric::new(self.domain.size());
+        let domains = Domains::new(self.domain.size());
         let pks_evals_x4 = self
             .pks_polys
             .clone()

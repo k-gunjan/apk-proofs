@@ -1,13 +1,11 @@
-use ark_bw6_761::{Fr, G1Projective};
-use ark_ec::pairing::Pairing;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, PrimeField};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use fflonk::pcs::PCS;
 
-use crate::{utils, Bitmask, CountingPublicInput, PublicInput, Keyset, KeysetGeneric};
-use crate::domains::{Domains, DomainsGeneric};
+use crate::{utils, Bitmask, CountingPublicInput, Keyset};
+use crate::domains::Domains;
 use crate::piop::{ProverProtocol, RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsAndBitmaskCommitments, PartialSumsAndBitmaskPolynomials};
 use crate::piop::bit_counting::{BitCountingEvaluation, BitCountingRegisters};
@@ -80,7 +78,7 @@ where
     type PI = CountingPublicInput<IC>;
 
 
-    fn init(domains: DomainsGeneric<OC::ScalarField>, bitmask: Bitmask, keyset: KeysetGeneric<IC, OC>) -> Self {
+    fn init(domains: Domains<OC::ScalarField>, bitmask: Bitmask, keyset: Keyset<IC, OC>) -> Self {
         CountingScheme {
             affine_addition_registers: AffineAdditionRegisters::new(domains.clone(), keyset, &bitmask.to_bits()),
             bit_counting_registers: BitCountingRegisters::new(domains, &bitmask),
@@ -181,14 +179,13 @@ impl<F: FftField> CountingEvaluations<F> {
 mod tests {
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
-    use fflonk::pcs::{PCS, PcsParams};
+    use fflonk::pcs::{kzg::KZG, PcsParams, PCS};
     use ark_bls12_377::G1Projective;
     use ark_bw6_761::{Fr, G1Projective as OuterCurve};
-    use crate::NewKzgBw6;
     use crate::test_helpers::{_random_bits, random_pks};
 
     use super::*;
-
+    type NewKzgBw6 = KZG<ark_bw6_761::BW6_761>;
     #[test]
     fn test_polynomial_ordering() {
         let rng = &mut test_rng();
@@ -197,7 +194,7 @@ mod tests {
 
 
         let kzg_params = NewKzgBw6::setup(m, rng);
-        let mut keyset = KeysetGeneric::<G1Projective, OuterCurve>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<G1Projective, OuterCurve>::new(random_pks(m, rng));
         keyset.amplify();
 
         let mut scheme: CountingScheme<Fr> = ProverProtocol::<G1Projective, OuterCurve, NewKzgBw6>::init(
