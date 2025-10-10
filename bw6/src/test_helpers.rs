@@ -1,13 +1,12 @@
-use ark_ec::{AffineRepr, CurveGroup};
+use ark_ec::CurveGroup;
 use ark_ff::FftField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{One, test_rng, Zero};
-use ark_std::{end_timer, start_timer, UniformRand};
+use ark_std::{end_timer, start_timer};
 use ark_std::rand::Rng;
-use fflonk::pcs::kzg::KZG;
 use fflonk::pcs::{PCS, PcsParams};
 use merlin::Transcript;
-type NewKzgBw6 = KZG<ark_bw6_761::BW6_761>;
+use crate::instances::bls12_377_bw6_761::kzg::Pcs;
 use crate::{Bitmask, CommitmentExt, Keyset, CountingProof, PackedProof, SimpleProof, Prover, PublicInput, setup, Verifier};
 
 pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<bool> {
@@ -99,7 +98,7 @@ pub fn test_simple_scheme(log_domain_size: u32) {
 
     type ProofType = SimpleProof<Fr, ark_bw6_761::G1Affine, fflonk::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
-    _test_prove_verify::<InnerCurve, OuterCurve, NewKzgBw6, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
+    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
         log_domain_size,
@@ -114,7 +113,7 @@ pub fn test_packed_scheme(log_domain_size: u32) {
 
     type ProofType = PackedProof<Fr, ark_bw6_761::G1Affine, fflonk::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
-    _test_prove_verify::<InnerCurve, OuterCurve, NewKzgBw6, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
+    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_packed(bitmask),
         |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
         log_domain_size,
@@ -129,7 +128,7 @@ pub fn test_counting_scheme(log_domain_size: u32) {
 
     type ProofType = CountingProof<Fr, ark_bw6_761::G1Affine, fflonk::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
-    _test_prove_verify::<InnerCurve, OuterCurve, NewKzgBw6, ProofType, CountingPublicInput<InnerCurve>, _, _>(
+    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, ProofType, CountingPublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
         log_domain_size,

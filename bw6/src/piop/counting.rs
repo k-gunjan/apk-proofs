@@ -179,13 +179,13 @@ impl<F: FftField> CountingEvaluations<F> {
 mod tests {
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
-    use fflonk::pcs::{kzg::KZG, PcsParams, PCS};
     use ark_bls12_377::G1Projective;
     use ark_bw6_761::{Fr, G1Projective as OuterCurve};
     use crate::test_helpers::{_random_bits, random_pks};
-
+    use crate::instances::bls12_377_bw6_761::kzg::Pcs;
+    use fflonk::pcs::PcsParams;
     use super::*;
-    type NewKzgBw6 = KZG<ark_bw6_761::BW6_761>;
+
     #[test]
     fn test_polynomial_ordering() {
         let rng = &mut test_rng();
@@ -193,11 +193,11 @@ mod tests {
         let m = n - 1;
 
 
-        let kzg_params = NewKzgBw6::setup(m, rng);
+        let kzg_params = Pcs::setup(m, rng);
         let mut keyset = Keyset::<G1Projective, OuterCurve>::new(random_pks(m, rng));
         keyset.amplify();
 
-        let mut scheme: CountingScheme<Fr> = ProverProtocol::<G1Projective, OuterCurve, NewKzgBw6>::init(
+        let mut scheme: CountingScheme<Fr> = ProverProtocol::<G1Projective, OuterCurve, Pcs>::init(
             Domains::new(n),
             Bitmask::from_bits(&_random_bits(m, 0.5, rng)),
             keyset,
@@ -205,11 +205,11 @@ mod tests {
 
         let zeta = Fr::rand(rng);
 
-        let actual_commitments = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, NewKzgBw6>>::get_register_polynomials_to_commit1(&scheme)
-    .commit(|p| NewKzgBw6::commit(&kzg_params.ck(), &p).0)
+        let actual_commitments = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::get_register_polynomials_to_commit1(&scheme)
+    .commit(|p| Pcs::commit(&kzg_params.ck(), &p).0)
     .as_vec();
-        let actual_evaluations = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, NewKzgBw6>>::evaluate_register_polynomials(&mut scheme, zeta).as_vec();
-        let polynomials = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, NewKzgBw6>>::get_register_polynomials_to_open(scheme);
+        let actual_evaluations = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::evaluate_register_polynomials(&mut scheme, zeta).as_vec();
+        let polynomials = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::get_register_polynomials_to_open(scheme);
 
         let expected_evaluations = polynomials.iter()
             .map(|p| p.evaluate(&zeta))
@@ -219,7 +219,7 @@ mod tests {
 
         let expected_commitments = polynomials.iter()
             .skip(2) // keyset commitment is publicly known
-            .map(|p| NewKzgBw6::commit(&kzg_params.ck(), &p).0)
+            .map(|p| Pcs::commit(&kzg_params.ck(), &p).0)
             .collect::<Vec<_>>();
         assert_eq!(actual_commitments, expected_commitments);
     }
