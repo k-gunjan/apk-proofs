@@ -1,8 +1,8 @@
 //! BLS12-377 + BW6-761 curve pairing instantiation
 //! 
 //! This module provides type aliases and constants for APK proofs using:
-//! - **Inner curve**: BLS12-377 G1 (for BLS signatures and public keys)
-//! - **Outer curve**: BW6-761 G1 (for proof generation and verification)
+//! - **Inner curve**: BLS12-377, for BLS signatures and public keys
+//! - **Outer curve**: BW6-761, for proof generation and verification
 //!
 //! The BLS12-377/BW6-761 pairing is particularly efficient for recursive
 //! proof composition due to the 2-chain structure where BW6-761's scalar
@@ -11,7 +11,7 @@
 //! ## Polynomial Commitment Schemes
 //!
 //! This pairing supports multiple PCS implementations:
-//! - [`kzg`] - KZG commitments (default, most efficient)
+//! - [`kzg`] - KZG commitments
 
 use ark_bls12_377::G1Projective as Bls12_377_G1;
 use ark_bw6_761::{Fq, Fr, G1Affine as BW6_761_G1Affine, G1Projective as BW6_761_G1};
@@ -26,9 +26,6 @@ use crate::{AccountablePublicInput, CountingPublicInput, Keyset};
 
 /// KZG polynomial commitment scheme types for this pairing
 pub mod kzg;
-
-// Future: Other PCS implementations
-// pub mod ipa;
 
 // ============================================================================
 // Curve Type Aliases
@@ -71,21 +68,21 @@ pub type OuterScalar = Fr;
 /// Keyset for BLS12-377 public keys with BW6-761 operations
 /// 
 /// This type is independent of the polynomial commitment scheme used.
-pub type Keyset377 = Keyset<InnerCurve, OuterCurve>;
+pub type KeysetBls12_377Bw6_671 = Keyset<InnerCurve, OuterCurve>;
 
 /// Accountable public input for simple and packed proof schemes
 /// 
 /// Contains:
 /// - Aggregate public key (APK) on the inner curve
 /// - Bitmask identifying which keys participated
-pub type AccountablePublicInput377 = AccountablePublicInput<InnerCurve>;
+pub type AccountablePublicInputBls12_377Bw6_761 = AccountablePublicInput<InnerCurve>;
 
 /// Counting public input for counting proof scheme
 /// 
 /// Contains:
 /// - Aggregate public key (APK) on the inner curve  
 /// - Count of participating keys (instead of full bitmask)
-pub type CountingPublicInput377 = CountingPublicInput<InnerCurve>;
+pub type CountingPublicInputBls12_377Bw6_761 = CountingPublicInput<InnerCurve>;
 
 // ============================================================================
 // Endomorphism Constants

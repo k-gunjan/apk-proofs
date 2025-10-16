@@ -6,7 +6,7 @@ use ark_std::{end_timer, start_timer};
 use ark_std::rand::Rng;
 use fflonk::pcs::{PCS, PcsParams};
 use merlin::Transcript;
-use crate::instances::bls12_377_bw6_761::kzg::Pcs;
+use crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761 as Pcs;
 use crate::{Bitmask, CommitmentExt, Keyset, CountingProof, PackedProof, SimpleProof, Prover, PublicInput, setup, Verifier};
 
 pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<bool> {

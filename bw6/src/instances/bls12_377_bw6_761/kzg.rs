@@ -8,7 +8,7 @@
 //! - **Trusted setup**: Requires a one-time trusted setup ceremony
 //! - **Proof size**: Constant-size proofs (single group element)
 //! - **Verification**: Single pairing check for batch verification
-//! - **Efficiency**: Most efficient option for proof size and verification time
+//! - **Efficiency**: Very efficient option for proof size and verification time
 
 use fflonk::pcs::kzg::commitment::KzgCommitment;
 use fflonk::pcs::kzg::KZG;
@@ -22,10 +22,10 @@ use crate::{CountingProof, KeysetCommitment, PackedProof, Prover, SimpleProof, V
 // ============================================================================
 
 /// KZG polynomial commitment scheme on BW6-761
-pub type Pcs = KZG<BW6_761>;
+pub type PcsKzgBw6_761 = KZG<BW6_761>;
 
 /// KZG commitment (a single BW6-761 G1 point)
-pub type Commitment = KzgCommitment<BW6_761>;
+pub type CommitmentKzgBw6_761 = KzgCommitment<BW6_761>;
 
 // ============================================================================
 // Core Types with KZG
@@ -35,13 +35,13 @@ pub type Commitment = KzgCommitment<BW6_761>;
 /// 
 /// Contains commitments to the two Lagrange-basis polynomials representing
 /// the x and y coordinates of the public keys.
-pub type KeysetCommitment377 = KeysetCommitment<OuterScalar, Commitment>;
+pub type KeysetCommitmentKzgBw6_761 = KeysetCommitment<OuterScalar, CommitmentKzgBw6_761>;
 
 /// Prover for BLS12-377 + BW6-761 with KZG commitments
-pub type Prover377 = Prover<InnerCurve, OuterCurve, Pcs>;
+pub type ProverBls12_377Bw6_761Kzg = Prover<InnerCurve, OuterCurve, PcsKzgBw6_761>;
 
 /// Verifier for BLS12-377 + BW6-761 with KZG commitments
-pub type Verifier377 = Verifier<InnerCurve, OuterCurve, Pcs>;
+pub type VerifierBls12_377Bw6_761Kzg = Verifier<InnerCurve, OuterCurve, PcsKzgBw6_761>;
 
 // ============================================================================
 // Proof Type Aliases
@@ -54,27 +54,17 @@ pub type Verifier377 = Verifier<InnerCurve, OuterCurve, Pcs>;
 /// - Quotient polynomial commitment
 /// - KZG opening proofs
 /// - Evaluations at the challenge point
-/// 
-/// **Proof size**: ~576 bytes (5 commitments + 6 field elements)
-pub type SimpleProof377 = SimpleProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
+pub type SimpleProofKzgBw6_761 = SimpleProof<OuterScalar, OuterAffine, CommitmentKzgBw6_761, OuterAffine>;
 
 /// Packed (succinct) APK proof using KZG commitments
 /// 
 /// This proof packs the bitmask into field elements for better efficiency
 /// when the bitmask is large. Includes additional commitments and evaluations
 /// for the packing verification.
-/// 
-/// **Proof size**: ~864 bytes (8 commitments + 9 field elements)
-/// 
-/// **Best for**: Large validator sets (n > 256) with varying participation
-pub type PackedProof377 = PackedProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
+pub type PackedProofKzgBw6_761 = PackedProof<OuterScalar, OuterAffine, CommitmentKzgBw6_761, OuterAffine>;
 
 /// Counting APK proof using KZG commitments
 /// 
 /// This proof only commits to the count of participants rather than their
 /// specific identities. More efficient when only the threshold matters.
-/// 
-/// **Proof size**: ~768 bytes (7 commitments + 8 field elements)
-/// 
-/// **Best for**: Threshold signatures where individual accountability is not required
-pub type CountingProof377 = CountingProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
+pub type CountingProofKzgBw6_761 = CountingProof<OuterScalar, OuterAffine, CommitmentKzgBw6_761, OuterAffine>;

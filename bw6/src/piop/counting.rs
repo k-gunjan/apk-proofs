@@ -182,7 +182,7 @@ mod tests {
     use ark_bls12_377::G1Projective;
     use ark_bw6_761::{Fr, G1Projective as OuterCurve};
     use crate::test_helpers::{_random_bits, random_pks};
-    use crate::instances::bls12_377_bw6_761::kzg::Pcs;
+    use crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761 as Pcs;
     use fflonk::pcs::PcsParams;
     use super::*;
 
