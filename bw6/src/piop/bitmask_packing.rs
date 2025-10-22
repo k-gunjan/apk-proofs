@@ -6,7 +6,7 @@ use ark_poly::{Evaluations, Polynomial, Radix2EvaluationDomain};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{end_timer, start_timer};
-use fflonk::pcs::PCS;
+use w3f_pcs::pcs::PCS;
 
 use crate::{Bitmask, utils};
 use crate::domains::Domains;

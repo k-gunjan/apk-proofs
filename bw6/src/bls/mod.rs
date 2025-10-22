@@ -2,7 +2,7 @@
 
 use std::borrow::Borrow;
 use std::ops::Neg;
-use ark_ec::{AffineRepr, CurveGroup, Group};
+use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};
 use ark_ec::pairing::Pairing;
 use ark_ff::{UniformRand, Zero};
 use ark_serialize::*;

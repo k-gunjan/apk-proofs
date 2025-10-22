@@ -2,7 +2,7 @@ use ark_ec::CurveGroup;
 use ark_ff::{Field, PrimeField};
 use ark_poly::Radix2EvaluationDomain;
 use ark_serialize::CanonicalSerialize;
-use fflonk::pcs::{Commitment, RawVerifierKey};
+use w3f_pcs::pcs::{Commitment, RawVerifierKey};
 use merlin::Transcript;
 
 use crate::{KeysetCommitment, PublicInput};

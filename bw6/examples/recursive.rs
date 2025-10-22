@@ -5,7 +5,7 @@ use ark_bls12_377::{Bls12_377, G2Projective};
 use ark_ec::AffineRepr;
 use ark_serialize::CanonicalSerialize;
 use ark_std::{end_timer, start_timer, test_rng};
-use fflonk::pcs::PcsParams;
+use w3f_pcs::pcs::PcsParams;
 use merlin::Transcript;
 use rand::Rng;
 use apk_proofs::bls::{PublicKey, SecretKey, Signature};
@@ -110,7 +110,7 @@ impl Validator {
     fn approve(
         &self,
         new_validator_set: &ValidatorSet,
-        pcs_params: &<PcsKzgBw6_761 as fflonk::pcs::PCS<OuterScalar>>::Params,
+        pcs_params: &<PcsKzgBw6_761 as w3f_pcs::pcs::PCS<OuterScalar>>::Params,
     ) -> Approval {
         // Computing the commitment to the new validator set is a time consuming operation.
         // In real-world deployments it is run by each validator, hence in parallel.
@@ -149,7 +149,7 @@ impl ValidatorSet {
 
     fn rotate<R: Rng>(
         &self,
-        pcs_params: &<PcsKzgBw6_761 as fflonk::pcs::PCS<OuterScalar>>::Params,
+        pcs_params: &<PcsKzgBw6_761 as w3f_pcs::pcs::PCS<OuterScalar>>::Params,
         rng: &mut R,
     ) -> (ValidatorSet, Vec<Approval>) {
         new_era();
@@ -179,14 +179,14 @@ impl ValidatorSet {
 }
 
 struct LightClient {
-    rvk: <<PcsKzgBw6_761 as fflonk::pcs::PCS<OuterScalar>>::Params as PcsParams>::RVK,
+    rvk: <<PcsKzgBw6_761 as w3f_pcs::pcs::PCS<OuterScalar>>::Params as PcsParams>::RVK,
     current_validator_set_commitment: KeysetCommitmentKzgBw6_761,
     quorum: usize,
 }
 
 impl LightClient {
     fn init(
-        rvk: <<PcsKzgBw6_761 as fflonk::pcs::PCS<OuterScalar>>::Params as PcsParams>::RVK,
+        rvk: <<PcsKzgBw6_761 as w3f_pcs::pcs::PCS<OuterScalar>>::Params as PcsParams>::RVK,
         genesis_keyset_commitment: KeysetCommitmentKzgBw6_761,
         quorum: usize,
     ) -> Self {
@@ -239,7 +239,7 @@ impl LightClient {
 }
 
 struct TrustlessHelper {
-    pcs_params: <PcsKzgBw6_761 as fflonk::pcs::PCS<OuterScalar>>::Params,
+    pcs_params: <PcsKzgBw6_761 as w3f_pcs::pcs::PCS<OuterScalar>>::Params,
     current_validator_set: ValidatorSet,
     prover: ProverBls12_377Bw6_761Kzg,
 }
@@ -248,7 +248,7 @@ impl TrustlessHelper {
     fn new(
         genesis_validator_set: ValidatorSet,
         genesis_validator_set_commitment: &KeysetCommitmentKzgBw6_761,
-        pcs_params: <PcsKzgBw6_761 as fflonk::pcs::PCS<OuterScalar>>::Params,
+        pcs_params: <PcsKzgBw6_761 as w3f_pcs::pcs::PCS<OuterScalar>>::Params,
     ) -> Self {
         let prover = ProverBls12_377Bw6_761Kzg::new(
             KeysetBls12_377Bw6_671::new(genesis_validator_set.raw_public_keys()),

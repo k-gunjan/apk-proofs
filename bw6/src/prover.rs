@@ -1,6 +1,6 @@
 use ark_ec::{CurveGroup, pairing::Pairing};
 use ark_poly::{EvaluationDomain, Polynomial};
-use fflonk::pcs::{PCS, PcsParams};
+use w3f_pcs::pcs::{PCS, PcsParams};
 use merlin::Transcript;
 
 use crate::{AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof};
@@ -112,7 +112,7 @@ where
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
         let partial_sums_polynomials = protocol.get_register_polynomials_to_commit1();
         let partial_sums_commitments = partial_sums_polynomials.commit(
-            |p| S::commit(&self.committer_key, &p).to_affine()
+            |p| S::commit(&self.committer_key, &p).unwrap().to_affine()
         );
 
          <Transcript as ApkTranscript<OC::ScalarField>>::append_register_commitments(&mut transcript, &partial_sums_commitments);
@@ -123,7 +123,7 @@ where
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
         let acc_register_commitments = acc_register_polynomials.commit(
-            |p| S::commit(&self.committer_key, &p).to_affine()
+            |p| S::commit(&self.committer_key, &p).unwrap().to_affine()
         );
         <Transcript as ApkTranscript<OC::ScalarField>>::append_2nd_round_register_commitments(&mut transcript, &acc_register_commitments);
 
@@ -131,7 +131,7 @@ where
         // compute and commit to the quotient polynomial.
         let phi = <Transcript as ApkTranscript<OC::ScalarField>>::get_constraints_aggregation_challenge(&mut transcript);
         let q_poly = protocol.compute_quotient_polynomial(phi, self.keyset.domain);
-        let q_comm = S::commit(&self.committer_key, &q_poly);
+        let q_comm = S::commit(&self.committer_key, &q_poly).unwrap();
         <Transcript as ApkTranscript<OC::ScalarField>>::append_quotient_commitment(&mut transcript, &q_comm);
 
         // 4. Receive the evaluation point,
@@ -153,9 +153,9 @@ where
         let mut register_polynomials = protocol.get_register_polynomials_to_open();
         register_polynomials.push(q_poly);
         let nus =  <Transcript as ApkTranscript<OC::ScalarField>>::get_kzg_aggregation_challenges(&mut transcript, register_polynomials.len());
-        let w_poly = fflonk::aggregation::single::aggregate_polys(&register_polynomials, &nus);
-        let w_at_zeta_proof = S::open(&self.committer_key, &w_poly, zeta);
-        let r_at_zeta_omega_proof = S::open(&self.committer_key, &r_poly, zeta_omega);
+        let w_poly = w3f_pcs::aggregation::single::aggregate_polys(&register_polynomials, &nus);
+        let w_at_zeta_proof = S::open(&self.committer_key, &w_poly, zeta).expect("opening zeta proof failed");
+        let r_at_zeta_omega_proof = S::open(&self.committer_key, &r_poly, zeta_omega).expect("opening zeta omega proof failed");
 
         // Finally, compose the proof.
         let proof = Proof {

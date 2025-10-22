@@ -4,8 +4,8 @@ use ark_ff::PrimeField;
 use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fflonk::pcs::Commitment;
-use fflonk::pcs::{CommitterKey, PCS};
+use w3f_pcs::pcs::Commitment;
+use w3f_pcs::pcs::{CommitterKey, PCS};
 use std::marker::PhantomData;
 use crate::hash_to_curve;
 use crate::domains::Domains;
@@ -91,8 +91,8 @@ where
 
         for affine_point in &affine_pks {
             let (x, y) = affine_point.xy().expect("Invalid point");
-            pks_x.push((*x).into());
-            pks_y.push((*y).into());
+            pks_x.push((x).into());
+            pks_y.push((y).into());
         }
         let pks_x_poly = Evaluations::from_vec_and_domain(pks_x, domain).interpolate();
         let pks_y_poly = Evaluations::from_vec_and_domain(pks_y, domain).interpolate();
@@ -126,8 +126,8 @@ where
         S: PCS<OC::ScalarField>
     {
         assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
-        let pks_x_comm = S::commit(kzg_pk, &self.pks_polys[0]);
-        let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]);
+        let pks_x_comm = S::commit(kzg_pk, &self.pks_polys[0]).expect("Commitment to pks_x_poly failed");
+        let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             log_domain_size: self.domain.log_size_of_group,

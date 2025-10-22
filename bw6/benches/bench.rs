@@ -8,9 +8,9 @@ use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2Evaluatio
 use ark_poly::univariate::DensePolynomial;
 use ark_std::{test_rng, UniformRand};
 use criterion::{BenchmarkId, black_box, Criterion, criterion_group, criterion_main, Throughput};
-use fflonk::pcs::kzg::KZG;
+use w3f_pcs::pcs::kzg::KZG;
 use apk_proofs::instances::bls12_377_bw6_761::{OMEGA, U};
-use fflonk::pcs::PcsParams;
+use w3f_pcs::pcs::PcsParams;
 use apk_proofs::{Keyset, setup, CommitmentExt};
 
 fn barycentric_evaluation<F: Field>(c: &mut Criterion, n: u32) {

@@ -3,7 +3,7 @@ use ark_ff::{Field, Zero};
 use ark_poly::Radix2EvaluationDomain;
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fflonk::pcs::PCS;
+use w3f_pcs::pcs::PCS;
 
 use crate::{utils, Bitmask, Keyset, PublicInput};
 use crate::domains::Domains;
@@ -127,7 +127,7 @@ where
     //TODO: remove domains param
     fn compute_quotient_polynomial(&self, phi: OC::ScalarField, domain: Radix2EvaluationDomain<OC::ScalarField>) -> DensePolynomial<OC::ScalarField> {
         let w = utils::randomize(phi, &self.compute_constraint_polynomials());
-        let (q_poly, r) = w.divide_by_vanishing_poly(domain).unwrap();
+        let (q_poly, r) = w.divide_by_vanishing_poly(domain);
         assert_eq!(r, DensePolynomial::zero());
         q_poly
     }

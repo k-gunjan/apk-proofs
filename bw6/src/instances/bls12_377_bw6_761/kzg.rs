@@ -10,8 +10,8 @@
 //! - **Verification**: Single pairing check for batch verification
 //! - **Efficiency**: Very efficient option for proof size and verification time
 
-use fflonk::pcs::kzg::commitment::KzgCommitment;
-use fflonk::pcs::kzg::KZG;
+use w3f_pcs::pcs::kzg::commitment::KzgCommitment;
+use w3f_pcs::pcs::kzg::KZG;
 use ark_bw6_761::BW6_761;
 
 use super::*;

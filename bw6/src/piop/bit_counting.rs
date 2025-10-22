@@ -228,7 +228,7 @@ mod tests {
 
         assert_eq!(x_eval_full, x_full.evaluate(&z));
         assert_eq!(x_eval_full, x_eval_main + x_lin_zw);
-        assert!(x_full.divide_by_vanishing_poly(domains.domain).unwrap().1.is_zero()); // actually x_full is 0 over the field
+        assert!(x_full.divide_by_vanishing_poly(domains.domain).1.is_zero()); // actually x_full is 0 over the field
     }
 
     #[test]
@@ -246,7 +246,7 @@ mod tests {
         let registers = BitCountingRegisters::<Fr>::new(domains.clone(), &good_bitmask);
         let constraint = BitmaskEndsWithZero::constraint_poly(&registers);
         assert_eq!(constraint.degree(), 2 * (n - 1));
-        assert!(constraint.divide_by_vanishing_poly(domain).unwrap().1.is_zero());
+        assert!(constraint.divide_by_vanishing_poly(domain).1.is_zero());
 
         let zeta = Fr::rand(rng);
         let prover_eval = constraint.evaluate(&zeta);
@@ -260,6 +260,6 @@ mod tests {
         let bad_bitmask = Bitmask::from_bits(&bad_bitmask);
         let registers = BitCountingRegisters::<Fr>::new(domains.clone(), &bad_bitmask);
         let constraint = BitmaskEndsWithZero::constraint_poly(&registers);
-        assert!(!constraint.divide_by_vanishing_poly(domain).unwrap().1.is_zero());
+        assert!(!constraint.divide_by_vanishing_poly(domain).1.is_zero());
     }
 }

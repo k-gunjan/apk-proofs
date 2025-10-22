@@ -1,6 +1,6 @@
 use ark_ec::CurveGroup;
 use ark_ff::{FftField, PrimeField};
-use fflonk::pcs::{PCS, PcsParams, CommitterKey};
+use w3f_pcs::pcs::{PCS, PcsParams, CommitterKey};
 use rand::Rng;
 
 /// Generate PCS parameters for a keyset of given size
@@ -63,7 +63,7 @@ mod tests {
     use super::*;
     use ark_bw6_761::{BW6_761, Fr};
     use ark_std::test_rng;
-    use fflonk::pcs::kzg::KZG;
+    use w3f_pcs::pcs::kzg::KZG;
 
     #[test]
     fn test_generate_for_domain() {

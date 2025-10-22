@@ -5,7 +5,7 @@ use ark_ec::short_weierstrass::{Affine, SWCurveConfig};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fflonk::pcs::kzg::commitment::KzgCommitment;
+use w3f_pcs::pcs::kzg::commitment::KzgCommitment;
 
 pub use bitmask::Bitmask;
 pub use keyset::{Keyset, KeysetCommitment};

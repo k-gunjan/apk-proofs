@@ -2,7 +2,7 @@ use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, PrimeField};
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fflonk::pcs::PCS;
+use w3f_pcs::pcs::PCS;
 
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
 use crate::domains::Domains;
@@ -183,7 +183,7 @@ mod tests {
     use ark_bw6_761::{Fr, G1Projective as OuterCurve};
     use crate::test_helpers::{_random_bits, random_pks};
     use crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761 as Pcs;
-    use fflonk::pcs::PcsParams;
+    use w3f_pcs::pcs::PcsParams;
     use super::*;
 
     #[test]
@@ -206,7 +206,7 @@ mod tests {
         let zeta = Fr::rand(rng);
 
         let actual_commitments = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::get_register_polynomials_to_commit1(&scheme)
-    .commit(|p| Pcs::commit(&kzg_params.ck(), &p).0)
+    .commit(|p| Pcs::commit(&kzg_params.ck(), &p).unwrap().0)
     .as_vec();
         let actual_evaluations = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::evaluate_register_polynomials(&mut scheme, zeta).as_vec();
         let polynomials = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::get_register_polynomials_to_open(scheme);
@@ -219,7 +219,7 @@ mod tests {
 
         let expected_commitments = polynomials.iter()
             .skip(2) // keyset commitment is publicly known
-            .map(|p| Pcs::commit(&kzg_params.ck(), &p).0)
+            .map(|p| Pcs::commit(&kzg_params.ck(), &p).unwrap().0)
             .collect::<Vec<_>>();
         assert_eq!(actual_commitments, expected_commitments);
     }

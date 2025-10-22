@@ -2,8 +2,8 @@ use ark_ec::CurveGroup;
 use ark_ff::{FftField, One, UniformRand};
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_std::{end_timer, start_timer};
-use fflonk::aggregation::single::aggregate_claims_multiexp;
-use fflonk::pcs::{PcsParams, RawVerifierKey, PCS};
+use w3f_pcs::aggregation::single::aggregate_claims_multiexp;
+use w3f_pcs::pcs::{PcsParams, RawVerifierKey, PCS};
 use merlin::{Transcript as MerlinTranscript, TranscriptRng};
 
 use crate::{utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof, CommitmentExt};
@@ -237,7 +237,7 @@ where
             values,
             proofs,
             fsrng,  // Use the transcript RNG for randomness
-        );
+        ).is_ok();
         
         assert!(verified, "PCS batch verification failed");
         end_timer!(t_batch_opening);

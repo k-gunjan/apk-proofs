@@ -5,7 +5,7 @@ use ark_ff::{FftField, Field, One, Zero};
 use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Polynomial, Radix2EvaluationDomain};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fflonk::pcs::PCS;
+use w3f_pcs::pcs::PCS;
 
 use crate::{point_in_g1_complement_g, Keyset};
 use crate::domains::Domains;
@@ -217,8 +217,8 @@ where
         let mut apk_acc_y = Vec::with_capacity(apk_acc.len());
         apk_acc.iter()
             .map(|p| {
-                apk_acc_x.push((*p.x().expect("invalid point")).into()); 
-                apk_acc_y.push((*p.y().expect("invalid point")).into());
+                apk_acc_x.push((p.x().expect("invalid point")).into()); 
+                apk_acc_y.push((p.y().expect("invalid point")).into());
             })
             .collect::<Vec<_>>();
 
@@ -488,8 +488,8 @@ where
     ) -> (OC::ScalarField, OC::ScalarField) {
         let h = point_in_g1_complement_g::<IC>().into_affine();
         let apk_plus_h = (h + apk).into_affine();
-        let (h_x, h_y): (OC::ScalarField, OC::ScalarField) = h.xy().map(|(x, y)| ((*x).into(), (*y).into())).expect("invalid point");
-        let (apk_plus_h_x, apk_plus_h_y): (OC::ScalarField, OC::ScalarField) = apk_plus_h.xy().map(|(x, y)| ((*x).into(), (*y).into())).expect("invalid point");
+        let (h_x, h_y): (OC::ScalarField, OC::ScalarField) = h.xy().map(|(x, y)| ((x).into(), (y).into())).expect("invalid point");
+        let (apk_plus_h_x, apk_plus_h_y): (OC::ScalarField, OC::ScalarField) = apk_plus_h.xy().map(|(x, y)| ((x).into(), (y).into())).expect("invalid point");
 
         let c1 = (x1 - h_x) * evals_at_zeta.l_first + (x1 - apk_plus_h_x) * evals_at_zeta.l_last;
         let c2 = (y1 - h_y) * evals_at_zeta.l_first + (y1 - apk_plus_h_y) * evals_at_zeta.l_last;

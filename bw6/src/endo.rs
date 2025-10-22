@@ -1,6 +1,5 @@
 use std::ops::AddAssign;
-use ark_ec::bw6::{BW6Config, G1Projective};
-use ark_ec::Group;
+use ark_ec::{AdditiveGroup, bw6::{BW6Config, G1Projective}};
 use ark_ff::{BitIteratorBE, Zero};
 
 // See https://github.com/celo-org/zexe/blob/master/algebra/src/bw6_761/curves/g1.rs#L37-L71

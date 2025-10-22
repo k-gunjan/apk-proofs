@@ -2,7 +2,7 @@ use ark_ec::CurveGroup;
 use ark_ff::FftField;
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use fflonk::pcs::PCS;
+use w3f_pcs::pcs::PCS;
 
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
 use crate::domains::Domains;

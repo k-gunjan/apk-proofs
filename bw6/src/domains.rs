@@ -67,7 +67,7 @@ impl<F: FftField> Domains<F> {
 
     /// Checks if the polynomial is identically zero over the smaller domain.
     pub fn is_zero(&self, poly: &DensePolynomial<F>) -> bool {
-        poly.divide_by_vanishing_poly(self.domain).unwrap().1 == DensePolynomial::zero()
+        poly.divide_by_vanishing_poly(self.domain).1 == DensePolynomial::zero()
     }
 
     /// Divides by the vanishing polynomial of the smaller domain.
@@ -75,7 +75,7 @@ impl<F: FftField> Domains<F> {
         &self,
         poly: &DensePolynomial<F>,
     ) -> (DensePolynomial<F>, DensePolynomial<F>) {
-        poly.divide_by_vanishing_poly(self.domain).unwrap() //TODO: arkworks never returns None
+        poly.divide_by_vanishing_poly(self.domain) //TODO: arkworks never returns None
     }
 
     /// Degree n polynomial c * L_{n-1} evaluated over domain of size 4 * n.

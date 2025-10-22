@@ -1,7 +1,7 @@
 use ark_ec::CurveGroup;
 use ark_ff::{FftField, PrimeField};
 use ark_poly::polynomial::univariate::DensePolynomial;
-use fflonk::pcs::PCS;
+use w3f_pcs::pcs::PCS;
 
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
 use crate::domains::Domains;
