@@ -4,3 +4,4 @@
 //! with different polynomial commitment schemes.
 
 pub mod bls12_377_bw6_761;
+pub mod bls12_381_bw6_767;

@@ -26,7 +26,7 @@ where
     S: PCS<F>,
 {
     let domain_size = 2usize.pow(log_domain_size);
-    
+    println!("F::TWO_ADICITY = {}", F::TWO_ADICITY);
     // To operate with polynomials of degree up to 4 * domain_size,
     // there should exist a domain of size 4 * domain_size
     assert!(

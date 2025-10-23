@@ -17,7 +17,6 @@ use ark_bls12_377::G1Projective as Bls12_377_G1;
 use ark_bw6_761::{Fq, Fr, G1Affine as BW6_761_G1Affine, G1Projective as BW6_761_G1};
 use ark_ff::MontFp;
 use ark_ec::bls12::Bls12Config;
-
 use crate::{AccountablePublicInput, CountingPublicInput, Keyset};
 
 // ============================================================================
