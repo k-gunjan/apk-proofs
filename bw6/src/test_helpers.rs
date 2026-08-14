@@ -221,3 +221,22 @@ pub fn test_counting_scheme_381(keyset_size: usize) {
         7 * 97 + 8 * 48, // 7C + 8F
     );
 }
+/// `prove_packed` must not exist on APK-381. This function is never called; it is here so the
+/// gate is visible, and so that deleting `SupportsPackedScheme` would be caught by the doc test
+/// below rather than silently re-enabling a scheme that cannot work.
+///
+/// ```compile_fail
+/// use apk_proofs::instances::bls12_381_bw6_767::kzg::Prover381;
+/// fn f(p: &Prover381, b: apk_proofs::Bitmask) {
+///     let _ = p.prove_packed(b);
+/// }
+/// ```
+///
+/// The same call compiles for APK-377:
+/// ```
+/// use apk_proofs::instances::bls12_377_bw6_761::kzg::ProverBls12_377Bw6_761Kzg as P377;
+/// fn f(p: &P377, b: apk_proofs::Bitmask) {
+///     let _ = p.prove_packed(b);
+/// }
+/// ```
+pub fn _packed_scheme_is_gated_to_apk_377() {}

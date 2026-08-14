@@ -27,7 +27,9 @@ pub mod instances;
 
 pub mod bls;
 pub mod domain;
-pub use domain::{CooleyTukeyDomain, DomainFactory, FftDomain, NaiveDomain, Radix2Domain};
+pub use domain::{
+    CooleyTukeyDomain, DomainFactory, FftDomain, NaiveDomain, Radix2Domain, SupportsPackedScheme,
+};
 
 mod transcript;
 

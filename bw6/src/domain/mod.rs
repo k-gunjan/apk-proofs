@@ -11,4 +11,4 @@ mod types;
 pub use cooley_tukey::{admissible_sizes, CooleyTukeyDomain};
 pub use naive::{subgroup_generator, NaiveDomain};
 pub use radix2::Radix2Domain;
-pub use types::{DomainFactory, FftDomain};
+pub use types::{DomainFactory, FftDomain, SupportsPackedScheme};

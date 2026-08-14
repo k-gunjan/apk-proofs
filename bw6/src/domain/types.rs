@@ -102,3 +102,14 @@ pub trait FftDomain<F: PrimeField>: Clone + Sized {
 pub trait DomainFactory<F: PrimeField>: FftDomain<F> {
     fn create_domain(size: usize) -> Self;
 }
+
+/// Marks domains that can supply the sizes the `packed` scheme needs.
+///
+/// `packed` splits the bitmask into 256-bit chunks and asserts `256 | n`. Only a radix-2 domain
+/// can guarantee that. Over BW6-767 it is outright impossible: `q - 1` carries a single factor
+/// of 2, so no domain size there is even a multiple of 4, let alone 256.
+///
+/// This is a marker rather than a runtime check so that asking for a packed proof on a
+/// configuration that cannot produce one fails to compile, instead of panicking inside the
+/// prover after the caller has already built a keyset.
+pub trait SupportsPackedScheme {}

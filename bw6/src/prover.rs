@@ -66,16 +66,6 @@ where
         self.prove::<BasicRegisterBuilder<OC::ScalarField, D>>(bitmask)
     }
 
-    pub fn prove_packed(
-        &self, 
-        bitmask: Bitmask
-    ) -> (
-        PackedProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
-        AccountablePublicInput<IC>
-    ) {
-        self.prove::<PackedRegisterBuilder<OC::ScalarField, D>>(bitmask)
-    }
-
 
         pub fn prove_counting(
         &self, 
@@ -176,5 +166,27 @@ where
         };
 
         (proof, public_input)
+    }
+}
+
+/// The packed scheme is only available where the domain can supply sizes divisible by 256.
+/// See [`SupportsPackedScheme`](crate::SupportsPackedScheme).
+impl<IC, OC, S, D> Prover<IC, OC, S, D>
+where
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField>,
+    S: PCS<OC::ScalarField>,
+    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine>,
+    D: DomainFactory<OC::ScalarField> + crate::SupportsPackedScheme,
+{
+    pub fn prove_packed(
+        &self,
+        bitmask: Bitmask,
+    ) -> (
+        PackedProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
+        AccountablePublicInput<IC>,
+    ) {
+        self.prove::<PackedRegisterBuilder<OC::ScalarField, D>>(bitmask)
     }
 }

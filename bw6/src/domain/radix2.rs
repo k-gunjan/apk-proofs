@@ -57,6 +57,9 @@ impl<F: PrimeField> FftDomain<F> for Radix2Domain<F> {
     }
 }
 
+/// Radix-2 domains are powers of two, so every size from 256 up is a multiple of 256.
+impl<F: PrimeField> super::types::SupportsPackedScheme for Radix2Domain<F> {}
+
 impl<F: PrimeField> DomainFactory<F> for Radix2Domain<F> {
     fn create_domain(size: usize) -> Self {
         Self::new(size)
