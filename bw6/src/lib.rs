@@ -26,6 +26,8 @@ pub mod utils;
 pub mod instances;
 
 pub mod bls;
+pub mod domain;
+pub use domain::{DomainFactory, FftDomain, Radix2Domain};
 
 mod transcript;
 
