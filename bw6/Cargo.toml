@@ -19,7 +19,12 @@ ark-bw6-767 = { version = "0.5", default-features = false }
 ark-bls12-377 = { version = "0.5", default-features = false, features = ["curve"] }
 ark-bls12-381 = { version = "0.5", default-features = false, features = ["curve"] }
 
-w3f-pcs = { git = "https://github.com/w3f/fflonk" }
+# Pinned: an unpinned git dependency makes the build non-reproducible, which would
+# quietly void the Docker-based reproducibility the milestone promises.
+#
+# NOTE: this revision cannot generate a KZG SRS for BW6-767 — URS::from_trapdoor asserts
+# n <= 2^TWO_ADICITY, which is 2 there. See instances::bls12_381_bw6_767::kzg::generate_urs.
+w3f-pcs = { git = "https://github.com/w3f/fflonk", rev = "26b6e2e15f7fa90eee97ebd039a4146a8dafc695" }
 
 rand = "0.8"
 merlin = "3.0"
