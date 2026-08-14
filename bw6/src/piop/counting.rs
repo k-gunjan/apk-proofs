@@ -5,6 +5,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
+use crate::domain::{DomainFactory, FftDomain};
 use crate::domains::Domains;
 use crate::piop::{ProverProtocol, RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsAndBitmaskCommitments, PartialSumsAndBitmaskPolynomials};
@@ -59,18 +60,19 @@ impl<F: FftField> RegisterEvaluations<F> for CountingEvaluations<F> {
     }
 }
 
-pub struct CountingScheme<F: PrimeField> {
-    affine_addition_registers: AffineAdditionRegisters<F>,
-    bit_counting_registers: BitCountingRegisters<F>,
+pub struct CountingScheme<F: PrimeField, D: DomainFactory<F>> {
+    affine_addition_registers: AffineAdditionRegisters<F, D>,
+    bit_counting_registers: BitCountingRegisters<F, D>,
     register_evaluations: Option<CountingEvaluations<F>>,
 }
 
-impl<IC, OC, S> ProverProtocol<IC, OC, S> for CountingScheme<OC::ScalarField> 
+impl<IC, OC, S, D> ProverProtocol<IC, OC, S, D> for CountingScheme<OC::ScalarField, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
+    D: DomainFactory<OC::ScalarField>,
 {
     type P1 = CountingPolynomials<OC::ScalarField>;
     type P2 = ();
@@ -78,7 +80,7 @@ where
     type PI = CountingPublicInput<IC>;
 
 
-    fn init(domains: Domains<OC::ScalarField>, bitmask: Bitmask, keyset: Keyset<IC, OC>) -> Self {
+    fn init(domains: Domains<OC::ScalarField, D>, bitmask: Bitmask, keyset: Keyset<IC, OC, D>) -> Self {
         CountingScheme {
             affine_addition_registers: AffineAdditionRegisters::new(domains.clone(), keyset, &bitmask.to_bits()),
             bit_counting_registers: BitCountingRegisters::new(domains, &bitmask),
@@ -177,6 +179,8 @@ impl<F: FftField> CountingEvaluations<F> {
 
 #[cfg(test)]
 mod tests {
+    type TestDomain = crate::Radix2Domain<ark_bw6_761::Fr>;
+    type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
     use ark_bls12_377::G1Projective;
@@ -194,22 +198,22 @@ mod tests {
 
 
         let kzg_params = Pcs::setup(m, rng);
-        let mut keyset = Keyset::<G1Projective, OuterCurve>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<G1Projective, OuterCurve, TestDomain>::new(random_pks(m, rng));
         keyset.amplify();
 
-        let mut scheme: CountingScheme<Fr> = ProverProtocol::<G1Projective, OuterCurve, Pcs>::init(
-            Domains::new(n),
+        let mut scheme: CountingScheme<Fr, TestDomain> = ProverProtocol::<G1Projective, OuterCurve, Pcs, TestDomain>::init(
+            TestDomains::new(n),
             Bitmask::from_bits(&_random_bits(m, 0.5, rng)),
             keyset,
         );
 
         let zeta = Fr::rand(rng);
 
-        let actual_commitments = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::get_register_polynomials_to_commit1(&scheme)
+        let actual_commitments = <CountingScheme<Fr, TestDomain> as ProverProtocol<G1Projective, OuterCurve, Pcs, TestDomain>>::get_register_polynomials_to_commit1(&scheme)
     .commit(|p| Pcs::commit(&kzg_params.ck(), &p).unwrap().0)
     .as_vec();
-        let actual_evaluations = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::evaluate_register_polynomials(&mut scheme, zeta).as_vec();
-        let polynomials = <CountingScheme<Fr> as ProverProtocol<G1Projective, OuterCurve, Pcs>>::get_register_polynomials_to_open(scheme);
+        let actual_evaluations = <CountingScheme<Fr, TestDomain> as ProverProtocol<G1Projective, OuterCurve, Pcs, TestDomain>>::evaluate_register_polynomials(&mut scheme, zeta).as_vec();
+        let polynomials = <CountingScheme<Fr, TestDomain> as ProverProtocol<G1Projective, OuterCurve, Pcs, TestDomain>>::get_register_polynomials_to_open(scheme);
 
         let expected_evaluations = polynomials.iter()
             .map(|p| p.evaluate(&zeta))

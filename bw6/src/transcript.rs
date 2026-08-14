@@ -1,17 +1,21 @@
 use ark_ec::CurveGroup;
 use ark_ff::{Field, PrimeField};
-use ark_poly::Radix2EvaluationDomain;
 use ark_serialize::CanonicalSerialize;
 use w3f_pcs::pcs::{Commitment, RawVerifierKey};
 use merlin::Transcript;
 
+use crate::domain::FftDomain;
 use crate::{KeysetCommitment, PublicInput};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
 
 pub(crate) trait ApkTranscript<F: PrimeField> {
 
-    fn set_protocol_params<VK: RawVerifierKey>(&mut self, domain: &Radix2EvaluationDomain<F>, kzg_vk: &VK) {
-        self._append_serializable(b"domain", domain);
+    fn set_protocol_params<D: FftDomain<F>, VK: RawVerifierKey>(&mut self, domain: &D, kzg_vk: &VK) {
+        // Bind the domain by size and generator rather than by serialising a concrete domain
+        // type. Sizes are not powers of two on BW6-767, and prover and verifier disagreeing
+        // about which domain a proof is over must be a verification failure, not silent.
+        self._append_serializable(b"domain_size", &(domain.size() as u64));
+        self._append_serializable(b"domain_generator", &domain.generator());
         self._append_serializable(b"vk", kzg_vk);
     }
 

@@ -67,7 +67,10 @@ pub type OuterScalar = Fr;
 /// Keyset for BLS12-377 public keys with BW6-761 operations
 /// 
 /// This type is independent of the polynomial commitment scheme used.
-pub type KeysetBls12_377Bw6_671 = Keyset<InnerCurve, OuterCurve>;
+/// Evaluation domain for BW6-761's scalar field: two-adicity 46, so radix-2 applies.
+pub type Domain761 = crate::Radix2Domain<OuterScalar>;
+
+pub type KeysetBls12_377Bw6_671 = Keyset<InnerCurve, OuterCurve, Domain761>;
 
 /// Accountable public input for simple and packed proof schemes
 /// 

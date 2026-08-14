@@ -25,7 +25,7 @@ pub(crate) fn random_pks<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C>
         .collect()
 }
 
-fn _test_prove_verify<IC, OC, S, ProofT, PI, P, V>(
+fn _test_prove_verify<IC, OC, S, D, ProofT, PI, P, V>(
     prove: P, 
     verify: V, 
     log_domain_size: u32, 
@@ -36,12 +36,13 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
+    D: crate::DomainFactory<OC::ScalarField>,
     S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine>,
     S::Params: Clone,
     ProofT: CanonicalSerialize + CanonicalDeserialize,
     PI: PublicInput<IC>,
-    P: Fn(Prover<IC, OC, S>, Bitmask) -> (ProofT, PI),
-    V: Fn(&Verifier<IC, OC, S>, &PI, &ProofT) -> bool,
+    P: Fn(Prover<IC, OC, S, D>, Bitmask) -> (ProofT, PI),
+    V: Fn(&Verifier<IC, OC, S, D>, &PI, &ProofT) -> bool,
 {
     let rng = &mut test_rng();
 
@@ -50,7 +51,7 @@ where
     end_timer!(t_setup);
 
     let keyset_size = 2usize.pow(log_domain_size) - 1;
-    let keyset = Keyset::<IC, OC>::new(random_pks(keyset_size, rng));
+    let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
 
     let pks_commitment_ = start_timer!(|| "signer set commitment");
     let pks_comm = keyset.commit::<S>(&pcs_params.ck());
@@ -98,7 +99,7 @@ pub fn test_simple_scheme(log_domain_size: u32) {
 
     type ProofType = SimpleProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
-    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
+    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
         log_domain_size,
@@ -113,7 +114,7 @@ pub fn test_packed_scheme(log_domain_size: u32) {
 
     type ProofType = PackedProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
-    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
+    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_packed(bitmask),
         |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
         log_domain_size,
@@ -128,7 +129,7 @@ pub fn test_counting_scheme(log_domain_size: u32) {
 
     type ProofType = CountingProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
-    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, ProofType, CountingPublicInput<InnerCurve>, _, _>(
+    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, CountingPublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
         log_domain_size,

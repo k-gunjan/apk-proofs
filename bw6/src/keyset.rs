@@ -1,14 +1,14 @@
 use ark_ec::CurveGroup;
 use ark_ec::AffineRepr;
 use ark_ff::PrimeField;
-use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
-use ark_poly::univariate::DensePolynomial;
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::Commitment;
 use w3f_pcs::pcs::{CommitterKey, PCS};
 use std::marker::PhantomData;
 use crate::hash_to_curve;
-use crate::domains::Domains;
+use crate::domain::{DomainFactory, FftDomain};
+use crate::domains::{Domains, Evals};
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -47,37 +47,35 @@ where
     _m: PhantomData<F>,
 }
 
-type EvaluationsX4<Field> = Evaluations<Field, Radix2EvaluationDomain<Field>>;
-
 #[derive(Clone)]
-pub struct Keyset<IC, OC>
+pub struct Keyset<IC, OC, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
+    D: DomainFactory<OC::ScalarField>,
 {
     // Actual public keys, no padding.
     pub pks: Vec<IC>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
     pub pks_polys: [DensePolynomial<OC::ScalarField>; 2],
     // Domain used to compute the interpolations above.
-    pub domain: Radix2EvaluationDomain<OC::ScalarField>,
+    pub domain: D,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
-    pub pks_evals_x4: Option<[EvaluationsX4<OC::ScalarField>; 2]>,
+    pub pks_evals_x4: Option<[Evals<OC::ScalarField>; 2]>,
 }
 
-impl<IC, OC> Keyset<IC, OC>
+impl<IC, OC, D> Keyset<IC, OC, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
+    D: DomainFactory<OC::ScalarField>,
 {
     pub fn new(pks: Vec<IC>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain: Radix2EvaluationDomain<OC::ScalarField> =
-            Radix2EvaluationDomain::<OC::ScalarField>::new(min_domain_size)
-                .expect("Failed to create evaluation domain");
+        let domain = D::create_domain(min_domain_size);
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
@@ -94,8 +92,8 @@ where
             pks_x.push((x).into());
             pks_y.push((y).into());
         }
-        let pks_x_poly = Evaluations::from_vec_and_domain(pks_x, domain).interpolate();
-        let pks_y_poly = Evaluations::from_vec_and_domain(pks_y, domain).interpolate();
+        let pks_x_poly = DensePolynomial::from_coefficients_vec(domain.interpolate(&pks_x));
+        let pks_y_poly = DensePolynomial::from_coefficients_vec(domain.interpolate(&pks_y));
         Self {
             pks,
             domain,
@@ -110,7 +108,7 @@ where
     }
 
     pub fn amplify(&mut self) {
-        let domains = Domains::new(self.domain.size());
+        let domains = Domains::<OC::ScalarField, D>::new(self.domain.size());
         let pks_evals_x4 = self
             .pks_polys
             .clone()
@@ -130,7 +128,7 @@ where
         let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
-            log_domain_size: self.domain.log_size_of_group,
+            log_domain_size: self.domain.size().trailing_zeros(),
             _m: PhantomData::default(),
         }
     }

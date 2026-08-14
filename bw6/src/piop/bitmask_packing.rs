@@ -2,14 +2,15 @@
 // use ark_ec::pairing::Pairing;
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, Field, One, PrimeField, Zero};
-use ark_poly::{Evaluations, Polynomial, Radix2EvaluationDomain};
+use ark_poly::Polynomial;
 use ark_poly::polynomial::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{end_timer, start_timer};
 use w3f_pcs::pcs::PCS;
 
 use crate::{Bitmask, utils};
-use crate::domains::Domains;
+use crate::domain::{DomainFactory, FftDomain};
+use crate::domains::{Domains, Evals};
 use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, PartialSumsAndBitmaskCommitments};
 use crate::utils::LagrangeEvaluations;
@@ -133,7 +134,7 @@ where
         let acc = self.acc;
         let c = self.c;
 
-        let a6 = BitmaskPackingRegisters::evaluate_inner_product_constraint_linearized(
+        let a6 = evaluate_inner_product_constraint_linearized(
             aggregated_bitmask,
             &evals_at_zeta,
             b,
@@ -141,7 +142,7 @@ where
             acc,
         );
 
-        let a7 = BitmaskPackingRegisters::evaluate_multipacking_mask_constraint_linearized(
+        let a7 = evaluate_multipacking_mask_constraint_linearized(
             a,
             r_pow_m,
             &evals_at_zeta,
@@ -182,24 +183,69 @@ where
 
 
 
-pub(crate) struct BitmaskPackingRegisters<F: PrimeField> {
-    domains: Domains<F>,
 
-    bitmask: Evaluations<F, Radix2EvaluationDomain<F>>,
-    c: Evaluations<F, Radix2EvaluationDomain<F>>,
-    c_shifted: Evaluations<F, Radix2EvaluationDomain<F>>,
-    acc: Evaluations<F, Radix2EvaluationDomain<F>>,
-    acc_shifted: Evaluations<F, Radix2EvaluationDomain<F>>,
+// Constraint evaluators shared by prover and verifier. Free functions rather than inherent
+// methods: the verifier evaluates constraints without ever constructing a domain, so it has
+// no `D` to name.
+pub(crate) fn evaluate_inner_product_constraint<F: PrimeField>(
+    bitmask_chunks_aggregated: F,
+    evals_at_zeta: &LagrangeEvaluations<F>,
+    b_zeta: F,
+    c_zeta: F,
+    acc_zeta: F,
+    acc_zeta_omega: F,
+) -> F {
+    acc_zeta_omega - acc_zeta - b_zeta * c_zeta + bitmask_chunks_aggregated * evals_at_zeta.l_last
+}
+
+pub(crate) fn evaluate_inner_product_constraint_linearized<F: PrimeField>(
+    bitmask_chunks_aggregated: F,
+    evals_at_zeta: &LagrangeEvaluations<F>,
+    b_zeta: F,
+    c_zeta: F,
+    acc_zeta: F
+) -> F {
+    evaluate_inner_product_constraint(bitmask_chunks_aggregated, evals_at_zeta, b_zeta, c_zeta, acc_zeta, F::zero())
+}
+
+pub(crate) fn evaluate_multipacking_mask_constraint<F: PrimeField>(
+    a: F,
+    r_pow_m: F,
+    evals_at_zeta: &LagrangeEvaluations<F>,
+    c_zeta: F,
+    c_zeta_omega: F
+) -> F {
+    c_zeta_omega - c_zeta * a - (F::one() - r_pow_m) * evals_at_zeta.l_last
+}
+
+pub(crate) fn evaluate_multipacking_mask_constraint_linearized<F: PrimeField>(
+    a: F,
+    r_pow_m: F,
+    evals_at_zeta: &LagrangeEvaluations<F>,
+    c_zeta: F,
+) -> F {
+    evaluate_multipacking_mask_constraint(a, r_pow_m, evals_at_zeta, c_zeta, F::zero())
+}
+
+
+pub(crate) struct BitmaskPackingRegisters<F: PrimeField, D: DomainFactory<F>> {
+    domains: Domains<F, D>,
+
+    bitmask: Evals<F>,
+    c: Evals<F>,
+    c_shifted: Evals<F>,
+    acc: Evals<F>,
+    acc_shifted: Evals<F>,
 
     bitmask_chunks_aggregated: F,
     polynomials: BitmaskPackingPolynomials<F>,
     r: F,
 }
 
-impl<F: PrimeField> BitmaskPackingRegisters<F> {
+impl<F: PrimeField, D: DomainFactory<F>> BitmaskPackingRegisters<F, D> {
 
     // TODO: remove bitmask arg
-    pub fn new(domains: Domains<F>,
+    pub fn new(domains: Domains<F, D>,
                bitmask: &Bitmask,
                bitmask_chunks_aggregation_challenge: F, // denoted 'r' in the write-ups
     ) -> Self {
@@ -236,7 +282,7 @@ impl<F: PrimeField> BitmaskPackingRegisters<F> {
     }
 
     fn new_unchecked(
-        domains: Domains<F>,
+        domains: Domains<F, D>,
 
         bitmask: Vec<F>,
         c: Vec<F>,
@@ -294,29 +340,10 @@ impl<F: PrimeField> BitmaskPackingRegisters<F> {
     pub fn compute_inner_product_constraint_polynomial(&self) -> DensePolynomial<F> {
         let bc_ln_x4 = self.domains.l_last_scaled_by(self.bitmask_chunks_aggregated);
         let constraint = &(&(&self.acc_shifted - &self.acc) - &(&self.bitmask * &self.c)) + &bc_ln_x4;
-        constraint.interpolate()
+        self.domains.interpolate_4x(&constraint)
     }
 
-    pub fn evaluate_inner_product_constraint(
-        bitmask_chunks_aggregated: F,
-        evals_at_zeta: &LagrangeEvaluations<F>,
-        b_zeta: F,
-        c_zeta: F,
-        acc_zeta: F,
-        acc_zeta_omega: F,
-    ) -> F {
-        acc_zeta_omega - acc_zeta - b_zeta * c_zeta + bitmask_chunks_aggregated * evals_at_zeta.l_last
-    }
 
-    pub fn evaluate_inner_product_constraint_linearized(
-        bitmask_chunks_aggregated: F,
-        evals_at_zeta: &LagrangeEvaluations<F>,
-        b_zeta: F,
-        c_zeta: F,
-        acc_zeta: F
-    ) -> F {
-        Self::evaluate_inner_product_constraint(bitmask_chunks_aggregated, evals_at_zeta, b_zeta, c_zeta, acc_zeta, F::zero())
-    }
 
     pub fn compute_multipacking_mask_constraint_polynomial(&self) -> DensePolynomial<F> {
         let n = self.domains.size;
@@ -330,32 +357,15 @@ impl<F: PrimeField> BitmaskPackingRegisters<F> {
         let ln_x4 = self.domains.l_last_scaled_by(x_todo);
 
         let a7 = &(&self.c_shifted - &(&self.c * &a_x4)) - &ln_x4;
-        a7.interpolate()
+        self.domains.interpolate_4x(&a7)
     }
 
-    pub fn evaluate_multipacking_mask_constraint(
-        a: F,
-        r_pow_m: F,
-        evals_at_zeta: &LagrangeEvaluations<F>,
-        c_zeta: F,
-        c_zeta_omega: F
-    ) -> F {
-        c_zeta_omega - c_zeta * a - (F::one() - r_pow_m) * evals_at_zeta.l_last
-    }
 
-    pub fn evaluate_multipacking_mask_constraint_linearized(
-        a: F,
-        r_pow_m: F,
-        evals_at_zeta: &LagrangeEvaluations<F>,
-        c_zeta: F,
-    ) -> F {
-        Self::evaluate_multipacking_mask_constraint(a, r_pow_m, evals_at_zeta, c_zeta, F::zero())
-    }
 }
 
 
 
-impl<F: PrimeField> BitmaskPackingRegisters<F> {
+impl<F: PrimeField, D: DomainFactory<F>> BitmaskPackingRegisters<F, D> {
     pub fn evaluate_register_polynomials(&self, point: F) -> (F, F) {
         //TODO: struct
         (
@@ -384,11 +394,14 @@ impl<F: PrimeField> BitmaskPackingRegisters<F> {
 
 #[cfg(test)]
 mod tests {
+    type TestDomain = crate::Radix2Domain<ark_bw6_761::Fr>;
+    type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
     use ark_bw6_761::Fr;
 
-    use crate::domains::Domains;
+    use crate::domain::{DomainFactory, FftDomain};
+use crate::domains::{Domains, Evals};
     use crate::test_helpers::_random_bits;
 
     use super::*;
@@ -397,7 +410,7 @@ mod tests {
     fn test_multipacking_mask_register() {
         let r = Fr::rand(&mut test_rng());
         let two = Fr::from(2u8);
-        let multipacking_mask = BitmaskPackingRegisters::<Fr>::build_multipacking_mask_register(4, 2, r);
+        let multipacking_mask = BitmaskPackingRegisters::<Fr, TestDomain>::build_multipacking_mask_register(4, 2, r);
         assert_eq!(multipacking_mask, vec![Fr::one(), two, r, r * two]);
     }
 
@@ -406,7 +419,7 @@ mod tests {
         let from_u8_vec = |v: [u8; 4]| v.iter().map(|&x| Fr::from(x)).collect::<Vec<Fr>>();
         let a = from_u8_vec([1, 2, 3, 4]);
         let b = from_u8_vec([5, 6, 7, 8]);
-        let partial_inner_product = BitmaskPackingRegisters::<Fr>::build_partial_inner_products_register(4, &a, &b);
+        let partial_inner_product = BitmaskPackingRegisters::<Fr, TestDomain>::build_partial_inner_products_register(4, &a, &b);
         assert_eq!(partial_inner_product, from_u8_vec([0, 1 * 5, 1 * 5 + 2 * 6, 1 * 5 + 2 * 6 + 3 * 7]));
     }
 
@@ -415,7 +428,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 256;
         let m = n - 1;
-        let domains = Domains::new(n);
+        let domains = TestDomains::new(n);
 
         let bitmask = Bitmask::from_bits(&_random_bits(m, 0.5, rng));
 

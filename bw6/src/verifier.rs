@@ -1,12 +1,12 @@
 use ark_ec::CurveGroup;
 use ark_ff::{FftField, One, UniformRand};
-use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 use ark_std::{end_timer, start_timer};
 use w3f_pcs::aggregation::single::aggregate_claims_multiexp;
 use w3f_pcs::pcs::{PcsParams, RawVerifierKey, PCS};
 use merlin::{Transcript as MerlinTranscript, TranscriptRng};
 
 use crate::{utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof, CommitmentExt};
+use crate::domain::{DomainFactory, FftDomain};
 use crate::fsrng::fiat_shamir_rng;
 use crate::piop::{RegisterCommitments, RegisterEvaluations, VerifierProtocol};
 use crate::piop::affine_addition::AffineAdditionEvaluations;
@@ -24,27 +24,29 @@ pub struct Challenges<F: FftField> {
     pub nus: Vec<F>,
 }
 
-pub struct Verifier<IC, OC, S>
+pub struct Verifier<IC, OC, S, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
+    D: DomainFactory<OC::ScalarField>,
 {
-    domain: Radix2EvaluationDomain<OC::ScalarField>,
+    domain: D,
     verifier_key: <S::Params as PcsParams>::RVK,
     pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
     preprocessed_transcript: Transcript,
     _marker: std::marker::PhantomData<(IC, S)>,
 }
 
-impl<IC, OC, S> Verifier<IC, OC, S> 
+impl<IC, OC, S, D> Verifier<IC, OC, S, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
     S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
+    D: DomainFactory<OC::ScalarField>,
 {
     pub fn new(
         verifier_key: <S::Params as PcsParams>::RVK,
@@ -52,8 +54,7 @@ where
         mut empty_transcript: Transcript,
     ) -> Self {
         let domain_size = 2usize.pow(pks_comm.log_domain_size);
-        let domain = Radix2EvaluationDomain::<OC::ScalarField>::new(domain_size)
-            .expect("Failed to create evaluation domain");
+        let domain = D::create_domain(domain_size);
         assert_eq!(domain.size(), domain_size);
 
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(&mut empty_transcript, &domain, &verifier_key);
@@ -78,10 +79,10 @@ where
             proof, 
             <AffineAdditionEvaluations<OC::ScalarField> as VerifierProtocol<IC, OC, S>>::POLYS_OPENED_AT_ZETA
         );
-        let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, self.domain);
+        let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, &self.domain);
 
         let t_linear_accountability = start_timer!(|| "linear accountability check");
-        let b_at_zeta = utils::barycentric_eval_binary_at(challenges.zeta, &public_input.bitmask, self.domain);
+        let b_at_zeta = utils::barycentric_eval_binary_at(challenges.zeta, &public_input.bitmask, &self.domain);
         end_timer!(t_linear_accountability);
 
         let evaluations_with_bitmask = AffineAdditionEvaluations {
@@ -114,7 +115,7 @@ where
             proof, 
             <SuccinctAccountableRegisterEvaluations<OC::ScalarField> as VerifierProtocol<IC, OC, S>>::POLYS_OPENED_AT_ZETA
         );
-        let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, self.domain);
+        let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, &self.domain);
 
         self.validate_evaluations(
             proof, 
@@ -130,7 +131,7 @@ where
             &evals_at_zeta, 
             challenges.r, 
             &public_input.bitmask, 
-            self.domain.size as u64
+            self.domain.size() as u64
         );
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
         proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial
@@ -147,7 +148,7 @@ where
             proof, 
             <CountingEvaluations<OC::ScalarField> as VerifierProtocol<IC, OC, S>>::POLYS_OPENED_AT_ZETA
         );
-        let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, self.domain);
+        let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, &self.domain);
         let count = OC::ScalarField::from(public_input.count as u32);
 
         self.validate_evaluations(

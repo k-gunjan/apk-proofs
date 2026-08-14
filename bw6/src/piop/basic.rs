@@ -1,10 +1,11 @@
 use ark_ec::CurveGroup;
-use ark_ff::FftField;
+use ark_ff::{FftField, PrimeField};
 use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
+use crate::domain::{DomainFactory, FftDomain};
 use crate::domains::Domains;
 use crate::piop::{ProverProtocol, RegisterEvaluations};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials};
@@ -26,26 +27,27 @@ impl<F: FftField> RegisterEvaluations<F> for AffineAdditionEvaluationsWithoutBit
     }
 }
 
-pub struct BasicRegisterBuilder<F: FftField> {
-    registers: AffineAdditionRegisters<F>,
+pub struct BasicRegisterBuilder<F: PrimeField, D: DomainFactory<F>> {
+    registers: AffineAdditionRegisters<F, D>,
     register_evaluations: Option<AffineAdditionEvaluations<F>>,
 }
 
-impl<IC, OC, S> ProverProtocol<IC, OC, S> for BasicRegisterBuilder<OC::ScalarField>
+impl<IC, OC, S, D> ProverProtocol<IC, OC, S, D> for BasicRegisterBuilder<OC::ScalarField, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
+    D: DomainFactory<OC::ScalarField>,
 {
     type P1 = PartialSumsPolynomials<OC::ScalarField>;
     type P2 = ();
     type E = AffineAdditionEvaluationsWithoutBitmask<OC::ScalarField>;
     type PI = AccountablePublicInput<IC>;
 
-    fn init(domains: Domains<OC::ScalarField>, bitmask: Bitmask, keyset: Keyset<IC, OC>) -> Self {
+    fn init(domains: Domains<OC::ScalarField, D>, bitmask: Bitmask, keyset: Keyset<IC, OC, D>) -> Self {
         BasicRegisterBuilder {
-            registers:  AffineAdditionRegisters::<OC::ScalarField>::new(domains, keyset, &bitmask.to_bits()),
+            registers:  AffineAdditionRegisters::<OC::ScalarField, D>::new(domains, keyset, &bitmask.to_bits()),
             register_evaluations: None,
         }
     }

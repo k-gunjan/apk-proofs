@@ -1,8 +1,9 @@
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{batch_inversion, FftField};
+use ark_ff::{batch_inversion, FftField, PrimeField};
 use ark_ff::{Field, Zero};
 use ark_poly::{EvaluationDomain, Polynomial, Radix2EvaluationDomain};
 
+use crate::domain::FftDomain;
 use crate::Bitmask;
 
 // Evaluates a polynomial represented as evaluations over a radix-2 domain (aka in Lagrange basis) at a point.
@@ -13,38 +14,30 @@ use crate::Bitmask;
 // using n multiplications to accumulate z * w_inv^i and then perform batch inversion.
 // Batch inversion costs 1 inv + 3n muls, and n more muls is required for fi * li(z),
 // resulting in around 1 inv + 5n muls
-pub fn barycentric_eval_at<F: FftField>(z: F, evals: &Vec<F>, domain: Radix2EvaluationDomain<F>) -> F {
+pub fn barycentric_eval_at<F: PrimeField, D: FftDomain<F>>(z: F, evals: &Vec<F>, domain: &D) -> F {
     let n = domain.size();
     assert_eq!(evals.len(), n);
-    // let timer_z_n =  std::time::Instant::now();
-    let mut z_n = z; // z^n, n=2^d - domain size, so squarings only
-    for _ in 0..domain.log_size_of_group {
-        z_n.square_in_place();
-    }
-    // println!("{}μs z^n for log_n={}", timer_z_n.elapsed().as_micros(), domain.log_size_of_group);
+    // Generic exponentiation rather than a chain of squarings: n is not a power of two in
+    // general. For radix-2 domains this computes exactly the same value.
+    let mut z_n = z.pow([n as u64]);
     z_n -= F::one();
-    z_n *= &domain.size_inv; // (z^n-1)/n
+    z_n *= &domain.size_inv(); // (z^n-1)/n
 
     let mut li_inv = Vec::with_capacity(n);
     let mut acc = z;
     for _ in 0..n {
         li_inv.push(acc - F::one());
-        acc *= domain.group_gen_inv;
+        acc *= domain.generator_inv();
     }
     batch_inversion(&mut li_inv);
     let s = evals.iter().zip(li_inv).map(|(fi, li)| li * fi).sum::<F>();
     z_n * s
 }
 
-pub fn barycentric_eval_binary_at<F: FftField>(z: F, evals: &Bitmask, domain: Radix2EvaluationDomain<F>) -> F {
-    // let timer_z_n =  std::time::Instant::now();
-    let mut z_n = z; // z^n, n=2^d - domain size, so squarings only
-    for _ in 0..domain.log_size_of_group {
-        z_n.square_in_place();
-    }
-    // println!("{}μs z^n for log_n={}", timer_z_n.elapsed().as_micros(), domain.log_size_of_group);
+pub fn barycentric_eval_binary_at<F: PrimeField, D: FftDomain<F>>(z: F, evals: &Bitmask, domain: &D) -> F {
+    let mut z_n = z.pow([domain.size() as u64]);
     z_n -= F::one();
-    z_n *= &domain.size_inv; // (z^n-1)/n
+    z_n *= &domain.size_inv(); // (z^n-1)/n
 
     let mut li_inv = Vec::with_capacity(evals.count_ones());
     let mut acc = z;
@@ -52,7 +45,7 @@ pub fn barycentric_eval_binary_at<F: FftField>(z: F, evals: &Bitmask, domain: Ra
         if b {
             li_inv.push(acc - F::one());
         }
-        acc *= domain.group_gen_inv;
+        acc *= domain.generator_inv();
     }
 
     batch_inversion(&mut li_inv);
@@ -70,24 +63,21 @@ pub struct LagrangeEvaluations<F: FftField> {
 }
 
 //TODO: move to domains
-pub fn lagrange_evaluations<F: FftField>(z: F, domain: Radix2EvaluationDomain<F>) -> LagrangeEvaluations<F> {
+pub fn lagrange_evaluations<F: PrimeField, D: FftDomain<F>>(z: F, domain: &D) -> LagrangeEvaluations<F> {
     // TODO: reuse this code with barycentric_eval methods
-    let mut z_n = z; // z^n, n=2^d - domain size, so squarings only
-    for _ in 0..domain.log_size_of_group {
-        z_n.square_in_place();
-    }
+    let z_n = z.pow([domain.size() as u64]);
 
     let z_n_minus_one = z_n - F::one();
-    let z_n_minus_one_div_n = z_n_minus_one * domain.size_inv;
+    let z_n_minus_one_div_n = z_n_minus_one * domain.size_inv();
 
-    let mut inv = [z - F::one(), domain.group_gen * z - F::one()];
+    let mut inv = [z - F::one(), domain.generator() * z - F::one()];
     batch_inversion(&mut inv);
     LagrangeEvaluations {
         vanishing_polynomial: z_n_minus_one,
         l_first: z_n_minus_one_div_n * inv[0],
         l_last: z_n_minus_one_div_n * inv[1],
-        zeta_minus_omega_inv: z - domain.group_gen_inv,
-        zeta_omega: z * domain.group_gen,
+        zeta_minus_omega_inv: z - domain.generator_inv(),
+        zeta_omega: z * domain.generator(),
     }
 }
 
@@ -172,7 +162,8 @@ mod tests {
         let evals = (0..n).map(|_| ark_bw6_761::Fr::rand(rng)).collect::<Vec<_>>();
         let poly = Evaluations::from_vec_and_domain(evals.clone(), domain).interpolate();
         let poly_at_z = poly.evaluate(&z);
-        assert_eq!(barycentric_eval_at(z, &evals, domain), poly_at_z);
+        let rdomain = crate::Radix2Domain(domain);
+        assert_eq!(barycentric_eval_at(z, &evals, &rdomain), poly_at_z);
 
         let bitmask = Bitmask::from_bits(&_random_bits(n.try_into().unwrap(), 1.0 / 2.0, rng));
         let bits_as_field_elements = bitmask.to_bits().iter()
@@ -180,8 +171,8 @@ mod tests {
             .collect::<Vec<_>>();
         let bits_poly = Evaluations::from_vec_and_domain(bits_as_field_elements.clone(), domain).interpolate();
         let bits_poly_at_z = bits_poly.evaluate(&z);
-        assert_eq!(barycentric_eval_at(z, &bits_as_field_elements, domain), bits_poly_at_z);
-        assert_eq!(barycentric_eval_binary_at(z, &bitmask, domain), bits_poly_at_z);
+        assert_eq!(barycentric_eval_at(z, &bits_as_field_elements, &rdomain), bits_poly_at_z);
+        assert_eq!(barycentric_eval_binary_at(z, &bitmask, &rdomain), bits_poly_at_z);
     }
 
     #[test]
@@ -206,7 +197,7 @@ mod tests {
         let domain = Radix2EvaluationDomain::<ark_bw6_761::Fr>::new(n).unwrap();
 
         let z = ark_bw6_761::Fr::rand(rng);
-        let evals = lagrange_evaluations(z, domain);
+        let evals = lagrange_evaluations(z, &crate::Radix2Domain(domain));
         assert_eq!(evals.vanishing_polynomial, domain.evaluate_vanishing_polynomial(z));
         let coeffs = domain.evaluate_all_lagrange_coefficients(z);
         assert_eq!(evals.l_first, coeffs[0]);

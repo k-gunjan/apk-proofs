@@ -1,18 +1,81 @@
-use ark_ff::{FftField, One, Zero};
+use ark_ff::PrimeField;
 use ark_poly::polynomial::univariate::DensePolynomial;
-use ark_poly::{DenseUVPolynomial, EvaluationDomain, Evaluations, Radix2EvaluationDomain};
-use ark_std::convert::TryInto;
+use ark_poly::DenseUVPolynomial;
+use ark_std::ops::{Add, AddAssign, Deref, Mul, MulAssign, Sub, SubAssign};
+use ark_std::Zero;
+
+use crate::domain::{DomainFactory, FftDomain};
+
+/// Evaluations of a polynomial over some domain, in natural order.
+///
+/// Replaces arkworks' `Evaluations`, which is tied to `EvaluationDomain` and so cannot be used
+/// once the domain type is abstract. The domain is deliberately *not* carried in the type: the
+/// length assert on every pointwise operation is what catches a domain mix-up.
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Evals<F> {
+    pub evals: Vec<F>,
+}
+
+impl<F> Deref for Evals<F> {
+    type Target = Vec<F>;
+    fn deref(&self) -> &Self::Target {
+        &self.evals
+    }
+}
+
+impl<F> From<Vec<F>> for Evals<F> {
+    fn from(evals: Vec<F>) -> Self {
+        Evals { evals }
+    }
+}
+
+macro_rules! impl_pointwise_op {
+    ($trait:ident, $method:ident, $assign_trait:ident, $assign_method:ident, $op:tt) => {
+        impl<'a, F: PrimeField> $assign_trait<&'a Evals<F>> for Evals<F> {
+            #[inline]
+            fn $assign_method(&mut self, rhs: &'a Evals<F>) {
+                assert_eq!(self.evals.len(), rhs.evals.len(), "evaluations over different domains");
+                ark_std::cfg_iter_mut!(self.evals)
+                    .zip(rhs.evals.iter())
+                    .for_each(|(a, b)| *a $op b)
+            }
+        }
+
+        impl<'a, 'b, F: PrimeField> $trait<&'a Evals<F>> for &'b Evals<F> {
+            type Output = Evals<F>;
+
+            #[inline]
+            fn $method(self, rhs: &'a Evals<F>) -> Evals<F> {
+                let mut result = self.clone();
+                result.$assign_method(rhs);
+                result
+            }
+        }
+    };
+}
+
+impl_pointwise_op!(Add, add, AddAssign, add_assign, +=);
+impl_pointwise_op!(Sub, sub, SubAssign, sub_assign, -=);
+impl_pointwise_op!(Mul, mul, MulAssign, mul_assign, *=);
+
+/// The three domains the PIOP works over: the trace domain `H` of size `n`, and two larger
+/// domains used to hold products of register polynomials in evaluation form.
+///
+/// The constraint polynomial has degree up to `4n - 3`, so recovering it takes `4n - 2`
+/// evaluations. The names `domain2x` / `domain4x` are historical: with radix-2 domains they are
+/// exactly `2n` and `4n`, but all the protocol actually requires is that they be large enough,
+/// which is what `new` asserts.
 #[derive(Clone)]
-pub struct Domains<F: FftField> {
+pub struct Domains<F: PrimeField, D: DomainFactory<F>> {
     //TODO: remove pub
-    pub domain: Radix2EvaluationDomain<F>,
-    pub domain2x: Radix2EvaluationDomain<F>,
-    pub domain4x: Radix2EvaluationDomain<F>,
+    pub domain: D,
+    pub domain2x: D,
+    pub domain4x: D,
 
     /// First Lagrange basis polynomial L_0 of degree n evaluated over the domain of size 4 * n; L_0(\omega^0) = 1
-    pub l_first_evals_over_4x: Evaluations<F, Radix2EvaluationDomain<F>>,
+    pub l_first_evals_over_4x: Evals<F>,
     /// Last  Lagrange basis polynomial L_{n-1} of degree n evaluated over the domain of size 4 * n; L_{n-1}(\omega^{n-1}}) = 1
-    pub l_last_evals_over_4x: Evaluations<F, Radix2EvaluationDomain<F>>,
+    pub l_last_evals_over_4x: Evals<F>,
     /// \omega, a primitive n-th root of unity. Multiplicative generator of the smaller domain.
     pub omega: F,
     /// \omega^{n-1}
@@ -21,26 +84,42 @@ pub struct Domains<F: FftField> {
     pub size: usize,
 }
 
-impl<F: FftField> Domains<F> {
+impl<F: PrimeField, D: DomainFactory<F>> Domains<F, D> {
     pub fn new(domain_size: usize) -> Self {
-        let domain = Radix2EvaluationDomain::<F>::new(domain_size).unwrap();
-        let domain2x = Radix2EvaluationDomain::<F>::new(2 * domain_size).unwrap();
-        let domain4x = Radix2EvaluationDomain::<F>::new(4 * domain_size).unwrap();
+        let domain = D::create_domain(domain_size);
+        // Multiply the *realized* size, not the requested one. `create_domain` rounds up to the
+        // next size the field supports, so `create_domain(domain_size * 4)` can return a domain
+        // smaller than 4 * domain.size() and silently truncate the constraint polynomial.
+        let n = domain.size();
+        let domain2x = D::create_domain(2 * n);
+        let domain4x = D::create_domain(4 * n);
+        assert!(
+            domain2x.size() >= 2 * n - 1,
+            "domain2x too small: {} < {}",
+            domain2x.size(),
+            2 * n - 1
+        );
+        assert!(
+            domain4x.size() >= 4 * n - 2,
+            "domain4x too small: {} < {}",
+            domain4x.size(),
+            4 * n - 2
+        );
 
-        let l_first = Self::first_lagrange_basis_polynomial(domain_size);
-        let l_last = Self::last_lagrange_basis_polynomial(domain_size);
-        let l_first_evals_over_4x = Self::_amplify(l_first, domain, domain4x);
-        let l_last_evals_over_4x = Self::_amplify(l_last, domain, domain4x);
+        let l_first = Self::first_lagrange_basis_polynomial(n);
+        let l_last = Self::last_lagrange_basis_polynomial(n);
+        let l_first_evals_over_4x = Self::_amplify(l_first, &domain, &domain4x);
+        let l_last_evals_over_4x = Self::_amplify(l_last, &domain, &domain4x);
 
         Domains {
+            omega: domain.generator(),
+            omega_inv: domain.generator_inv(),
+            size: n,
+            l_first_evals_over_4x,
+            l_last_evals_over_4x,
             domain,
             domain2x,
             domain4x,
-            l_first_evals_over_4x,
-            l_last_evals_over_4x,
-            omega: domain.group_gen,
-            omega_inv: domain.group_gen_inv,
-            size: domain.size(),
         }
     }
 
@@ -48,26 +127,35 @@ impl<F: FftField> Domains<F> {
     /// resulting in a degree < n polynomial.
     pub fn interpolate(&self, evals: Vec<F>) -> DensePolynomial<F> {
         // TODO: assert evals.len()
-        Evaluations::from_vec_and_domain(evals, self.domain).interpolate()
+        DensePolynomial::from_coefficients_vec(self.domain.interpolate(&evals))
+    }
+
+    /// Interpolates evaluations taken over the 4x domain back into coefficient form.
+    /// Exact because `new` guarantees `domain4x.size() >= 4n - 2`, the degree bound of the
+    /// highest-degree constraint polynomial.
+    pub fn interpolate_4x(&self, evals: &Evals<F>) -> DensePolynomial<F> {
+        DensePolynomial::from_coefficients_vec(self.domain4x.interpolate(&evals.evals))
+    }
+
+    /// Interpolates evaluations taken over the 2x domain back into coefficient form.
+    pub fn interpolate_2x(&self, evals: &Evals<F>) -> DensePolynomial<F> {
+        DensePolynomial::from_coefficients_vec(self.domain2x.interpolate(&evals.evals))
     }
 
     /// Produces evaluations of the degree < n polynomial over the larger domain,
     /// resulting in a vec of evaluations of length 4n.
-    pub fn amplify_polynomial(
-        &self,
-        poly: &DensePolynomial<F>,
-    ) -> Evaluations<F, Radix2EvaluationDomain<F>> {
+    pub fn amplify_polynomial(&self, poly: &DensePolynomial<F>) -> Evals<F> {
         // TODO: assert poly.degree()
-        poly.evaluate_over_domain_by_ref(self.domain4x)
+        self.domain4x.fft(&poly.coeffs).into()
     }
 
-    pub fn amplify(&self, evals: Vec<F>) -> Evaluations<F, Radix2EvaluationDomain<F>> {
-        Self::_amplify(evals, self.domain, self.domain4x)
+    pub fn amplify(&self, evals: Vec<F>) -> Evals<F> {
+        Self::_amplify(evals, &self.domain, &self.domain4x)
     }
 
     /// Checks if the polynomial is identically zero over the smaller domain.
     pub fn is_zero(&self, poly: &DensePolynomial<F>) -> bool {
-        poly.divide_by_vanishing_poly(self.domain).1 == DensePolynomial::zero()
+        self.domain.divide_by_vanishing_poly(poly).1 == DensePolynomial::zero()
     }
 
     /// Divides by the vanishing polynomial of the smaller domain.
@@ -75,33 +163,24 @@ impl<F: FftField> Domains<F> {
         &self,
         poly: &DensePolynomial<F>,
     ) -> (DensePolynomial<F>, DensePolynomial<F>) {
-        poly.divide_by_vanishing_poly(self.domain) //TODO: arkworks never returns None
+        self.domain.divide_by_vanishing_poly(poly)
     }
 
     /// Degree n polynomial c * L_{n-1} evaluated over domain of size 4 * n.
-    pub fn l_last_scaled_by(&self, c: F) -> Evaluations<F, Radix2EvaluationDomain<F>> {
+    pub fn l_last_scaled_by(&self, c: F) -> Evals<F> {
         &self.constant_4x(c) * &self.l_last_evals_over_4x
     }
 
-    pub fn constant_4x(&self, c: F) -> Evaluations<F, Radix2EvaluationDomain<F>> {
+    pub fn constant_4x(&self, c: F) -> Evals<F> {
         // TODO: ConstantEvaluations to save memory
-        let evals = vec![c; self.domain4x.size()];
-        Evaluations::from_vec_and_domain(evals, self.domain4x)
+        vec![c; self.domain4x.size()].into()
     }
 
     /// Produces evaluations of a degree n polynomial in 4n points, given evaluations in n points.
     /// That allows arithmetic operations with degree n polynomials in evaluations form until the result extends degree 4n.
-    // TODO: test
-    // takes nlogn + 4nlog(4n) = nlogn + 4nlogn + 8n
-    // TODO: can we do better?
-    fn _amplify(
-        evals: Vec<F>,
-        domain: Radix2EvaluationDomain<F>,
-        domain4x: Radix2EvaluationDomain<F>,
-    ) -> Evaluations<F, Radix2EvaluationDomain<F>> {
-        let poly = Evaluations::from_vec_and_domain(evals, domain).interpolate();
-        let evals4x = poly.evaluate_over_domain(domain4x);
-        evals4x
+    fn _amplify(evals: Vec<F>, domain: &D, domain_nx: &D) -> Evals<F> {
+        let coeffs = domain.interpolate(&evals);
+        domain_nx.fft(&coeffs).into()
     }
 
     fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<F> {
@@ -118,72 +197,36 @@ impl<F: FftField> Domains<F> {
         li
     }
 
-    pub fn amplify_x2(&self, evals: Vec<F>) -> Evaluations<F, Radix2EvaluationDomain<F>> {
-        let evals = Evaluations::from_vec_and_domain(evals, self.domain);
-        let poly = evals.interpolate_by_ref();
-        let evals = evals.evals;
-
-        let omega_2x = self.domain2x.group_gen;
-        let coset_poly = Self::coset_polynomial(&poly, omega_2x);
-        let coset_evals = coset_poly.evaluate_over_domain_by_ref(self.domain);
-        let evals2x = evals
-            .into_iter()
-            .zip(coset_evals.evals)
-            .flat_map(|(e, ce)| vec![e, ce])
-            .collect();
-        Evaluations::from_vec_and_domain(evals2x, self.domain2x)
+    // TODO: restore the coset fast path for radix-2 domains. When domain2x is domain nested with
+    // index 2, p(domain2x) can be computed as two n-point FFTs (p over H, interleaved with p'
+    // over H where p'(X) = p(gX)) instead of one 2n-point FFT. That interleaving is only valid
+    // under nesting, which BW6-767 does not have, so it belongs behind the domain abstraction
+    // rather than here. `test_coset_amplify` below still pins the identity it relies on.
+    pub fn amplify_x2(&self, evals: Vec<F>) -> Evals<F> {
+        Self::_amplify(evals, &self.domain, &self.domain2x)
     }
 
-    pub fn amplify_x4(&self, evals: Vec<F>) -> Evaluations<F, Radix2EvaluationDomain<F>> {
-        let evals = Evaluations::from_vec_and_domain(evals, self.domain);
-        let poly = evals.interpolate_by_ref();
-        let evals = evals.evals;
-
-        let omega_4x = self.domain4x.group_gen;
-        let coset_evals: [Vec<F>; 3] = (1..4)
-            .map(|i| omega_4x.pow([i]))
-            .map(|gi| Self::coset_polynomial(&poly, gi))
-            .map(|p| p.evaluate_over_domain_by_ref(self.domain).evals)
-            .collect::<Vec<_>>()
-            .try_into()
-            .unwrap();
-        let evals_4x = evals
-            .iter()
-            .zip(&coset_evals[0])
-            .zip(&coset_evals[1])
-            .zip(&coset_evals[2])
-            .flat_map(|(((g0, g1), g2), g3)| [g0, g1, g2, g3])
-            .cloned()
-            .collect();
-        Evaluations::from_vec_and_domain(evals_4x, self.domain4x)
-    }
-
-    /// For a polynomial p returns a polynomial p' such that p'(H) = p(gH)
-    fn coset_polynomial(poly: &DensePolynomial<F>, g: F) -> DensePolynomial<F> {
-        let coset_coeffs = poly
-            .coeffs
-            .iter()
-            .scan(F::one(), |pow, &coeff| {
-                let coset_coeff = *pow * coeff;
-                *pow = *pow * g;
-                Some(coset_coeff)
-            })
-            .collect();
-        DensePolynomial::from_coefficients_vec(coset_coeffs)
+    pub fn amplify_x4(&self, evals: Vec<F>) -> Evals<F> {
+        Self::_amplify(evals, &self.domain, &self.domain4x)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use ark_bw6_761::Fr;
-    use ark_std::{test_rng, UniformRand};
+    use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
+    use ark_std::{test_rng, One, UniformRand};
+
+    use crate::Radix2Domain;
 
     use super::*;
 
+    type TestDomains = Domains<Fr, Radix2Domain<Fr>>;
+
+    /// Pins the identity that the (temporarily removed) coset fast path in `amplify_x2` relies
+    /// on, so it can be restored against a working reference.
     #[test]
     fn test_coset_amplify() {
-        use ark_poly::DenseUVPolynomial;
-
         let rng = &mut test_rng();
         let n = 64;
 
@@ -234,7 +277,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 64;
 
-        let domains = Domains::new(n);
+        let domains = TestDomains::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
         let poly = domains.interpolate(evals.clone());
@@ -243,23 +286,23 @@ mod tests {
         let evals4x_from_vec = domains.amplify(evals);
 
         assert_eq!(evals4x_from_poly, evals4x_from_vec);
-        assert_eq!(evals4x_from_poly.interpolate(), poly);
+        assert_eq!(domains.interpolate_4x(&evals4x_from_poly), poly);
     }
 
+    /// `amplify_x2` must produce the same evaluations as a direct 2n-point FFT. This is what
+    /// makes dropping the coset fast path result-preserving.
     #[test]
     fn test_amplify_2x() {
         let rng = &mut test_rng();
         let n = 64;
 
-        let domains = Domains::new(n);
+        let domains = TestDomains::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
-        let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
-        let evals2x = poly.evaluate_over_domain_by_ref(domains.domain2x);
+        let poly = domains.interpolate(evals.clone());
+        let evals2x: Evals<Fr> = domains.domain2x.fft(&poly.coeffs).into();
 
-        let evals2x_2 = domains.amplify_x2(evals);
-
-        assert_eq!(evals2x, evals2x_2);
+        assert_eq!(evals2x, domains.amplify_x2(evals));
     }
 
     #[test]
@@ -272,8 +315,17 @@ mod tests {
         let mut c_ln = vec![Fr::zero(); n];
         c_ln[n - 1] = c;
 
-        let domains = Domains::new(n);
+        let domains = TestDomains::new(n);
 
         assert_eq!(domains.l_last_scaled_by(c), domains.amplify(c_ln));
+    }
+
+    /// The expanded domains must be sized off the realized base size, not the requested one.
+    #[test]
+    fn test_expanded_domains_are_sized_off_realized_base() {
+        let domains = TestDomains::new(33); // rounds up to 64
+        assert_eq!(domains.size, 64);
+        assert!(domains.domain2x.size() >= 2 * 64 - 1);
+        assert!(domains.domain4x.size() >= 4 * 64 - 2);
     }
 }

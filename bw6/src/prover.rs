@@ -4,6 +4,7 @@ use w3f_pcs::pcs::{PCS, PcsParams};
 use merlin::Transcript;
 
 use crate::{AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof};
+use crate::domain::{DomainFactory, FftDomain};
 use crate::domains::Domains;
 use crate::piop::basic::BasicRegisterBuilder;
 use crate::piop::counting::CountingScheme;
@@ -13,29 +14,31 @@ use crate::piop::RegisterPolynomials;
 use crate::transcript::ApkTranscript;
 
 
-pub struct Prover<IC, OC, S>
+pub struct Prover<IC, OC, S, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
+    D: DomainFactory<OC::ScalarField>,
 {
-    domains: Domains<OC::ScalarField>,
-    keyset: Keyset<IC, OC>,
+    domains: Domains<OC::ScalarField, D>,
+    keyset: Keyset<IC, OC, D>,
     committer_key: S::CK,
     preprocessed_transcript: Transcript,
 }
 
-impl<IC, OC, S> Prover<IC, OC, S> 
+impl<IC, OC, S, D> Prover<IC, OC, S, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
-    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine>
+    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine>,
+    D: DomainFactory<OC::ScalarField>,
 {
     pub fn new(
-        mut keyset: Keyset<IC, OC>,
+        mut keyset: Keyset<IC, OC, D>,
         keyset_comm: &KeysetCommitment<OC::ScalarField, S::C>,
         // prover needs both KZG pk and vk, as it commits to the latter to bind the srs
         pcs_params: S::Params,
@@ -60,7 +63,7 @@ where
     pub fn prove_simple(&self, bitmask: Bitmask) -> (
         SimpleProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
         AccountablePublicInput<IC>) {
-        self.prove::<BasicRegisterBuilder<OC::ScalarField>>(bitmask)
+        self.prove::<BasicRegisterBuilder<OC::ScalarField, D>>(bitmask)
     }
 
     pub fn prove_packed(
@@ -70,7 +73,7 @@ where
         PackedProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
         AccountablePublicInput<IC>
     ) {
-        self.prove::<PackedRegisterBuilder<OC::ScalarField>>(bitmask)
+        self.prove::<PackedRegisterBuilder<OC::ScalarField, D>>(bitmask)
     }
 
 
@@ -81,7 +84,7 @@ where
         CountingProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
         CountingPublicInput<IC>
     ) {
-        self.prove::<CountingScheme<OC::ScalarField>>(bitmask)
+        self.prove::<CountingScheme<OC::ScalarField, D>>(bitmask)
     }
 
 
@@ -97,7 +100,7 @@ where
         P::PI
     )
     where
-        P: ProverProtocol<IC, OC, S>,
+        P: ProverProtocol<IC, OC, S, D>,
     {
         assert_eq!(bitmask.size(), self.keyset.size());
         assert!(bitmask.count_ones() > 0); // as EC identity doesn't have and affine representation
@@ -130,7 +133,7 @@ where
         // 3. Receive constraint aggregation challenge,
         // compute and commit to the quotient polynomial.
         let phi = <Transcript as ApkTranscript<OC::ScalarField>>::get_constraints_aggregation_challenge(&mut transcript);
-        let q_poly = protocol.compute_quotient_polynomial(phi, self.keyset.domain);
+        let q_poly = protocol.compute_quotient_polynomial(phi, &self.keyset.domain);
         let q_comm = S::commit(&self.committer_key, &q_poly).unwrap();
         <Transcript as ApkTranscript<OC::ScalarField>>::append_quotient_commitment(&mut transcript, &q_comm);
 
@@ -141,7 +144,7 @@ where
         let zeta = <Transcript as ApkTranscript<OC::ScalarField>>::get_evaluation_point(&mut transcript);
         let register_evaluations = protocol.evaluate_register_polynomials(zeta);
         let q_zeta = q_poly.evaluate(&zeta);
-        let zeta_omega = zeta * self.keyset.domain.group_gen;
+        let zeta_omega = zeta * self.keyset.domain.generator();
         let r_poly = protocol.compute_linearization_polynomial(phi, zeta);
         let r_zeta_omega = r_poly.evaluate(&zeta_omega);
          <Transcript as ApkTranscript<OC::ScalarField>>::append_evaluations(&mut transcript, &register_evaluations, &q_zeta, &r_zeta_omega);

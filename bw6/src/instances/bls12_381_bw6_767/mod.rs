@@ -74,7 +74,11 @@ pub type OuterScalar = Fr;
 /// Keyset for BLS12-381 public keys with BW6-761 operations
 /// 
 /// This type is independent of the polynomial commitment scheme used.
-pub type Keyset381 = Keyset<InnerCurve, OuterCurve>;
+/// Placeholder domain for BW6-767. Two-adicity is 1, so radix-2 does NOT exist in this field
+/// and this alias will not construct; it is replaced by the Cooley-Tukey + Rader domain.
+pub type Domain767 = crate::Radix2Domain<OuterScalar>;
+
+pub type Keyset381 = Keyset<InnerCurve, OuterCurve, Domain767>;
 
 /// Accountable public input for simple and packed proof schemes
 /// 

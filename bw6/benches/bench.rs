@@ -11,7 +11,10 @@ use criterion::{BenchmarkId, black_box, Criterion, criterion_group, criterion_ma
 use w3f_pcs::pcs::kzg::KZG;
 use apk_proofs::instances::bls12_377_bw6_761::{OMEGA, U};
 use w3f_pcs::pcs::PcsParams;
-use apk_proofs::{Keyset, setup, CommitmentExt};
+use apk_proofs::{Keyset, setup, CommitmentExt, FftDomain};
+
+/// BW6-761's scalar field is 2-adic, so the benches use the radix-2 domain.
+type BenchDomain = apk_proofs::Radix2Domain<Fr>;
 
 fn barycentric_evaluation<F: Field>(c: &mut Criterion, n: u32) {
     use ark_poly::{Evaluations, EvaluationDomain, Radix2EvaluationDomain, Polynomial};
@@ -25,7 +28,7 @@ fn barycentric_evaluation<F: Field>(c: &mut Criterion, n: u32) {
 
     c.bench_function("barycentric_evaluation", move |b| {
         b.iter(|| {
-            apk_proofs::utils::barycentric_eval_at(black_box(z), black_box(&evals), black_box(domain))
+            apk_proofs::utils::barycentric_eval_at(black_box(z), black_box(&evals), black_box(&apk_proofs::Radix2Domain(domain)))
         })
     });
 
@@ -100,7 +103,7 @@ fn amplification(c: &mut Criterion) {
 
     for log_domain_size in log_domain_size_range {
         let n = 2u32.pow(log_domain_size) as usize;
-        let domains = Domains::new(n);
+        let domains = Domains::<Fr, BenchDomain>::new(n);
 
         let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
 
@@ -108,8 +111,8 @@ fn amplification(c: &mut Criterion) {
             BenchmarkId::new("2x", log_domain_size),
             &log_domain_size,
             |b, _| b.iter(|| {
-                let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
-                poly.evaluate_over_domain_by_ref(domains.domain2x)
+                let poly = domains.interpolate(evals.clone());
+                domains.domain2x.fft(&poly.coeffs)
             }),
         );
 
@@ -125,8 +128,8 @@ fn amplification(c: &mut Criterion) {
             BenchmarkId::new("4x", log_domain_size),
             &log_domain_size,
             |b, _| b.iter(|| {
-                let poly = Evaluations::from_vec_and_domain(evals.clone(), domains.domain).interpolate();
-                poly.evaluate_over_domain_by_ref(domains.domain4x)
+                let poly = domains.interpolate(evals.clone());
+                domains.domain4x.fft(&poly.coeffs)
             }),
         );
 
@@ -160,14 +163,14 @@ fn verification(c: &mut Criterion) {
             .map(|_| InnerCurve::rand(rng))
             .collect();
         
-        let keyset = Keyset::<InnerCurve, OuterCurve>::new(pks);
+        let keyset = Keyset::<InnerCurve, OuterCurve, BenchDomain>::new(pks);
         
         let pcs_params = setup::generate_for_keyset::<_, TestPCS, _>(keyset_size, rng);
         let pks_comm = keyset.commit::<TestPCS>(&pcs_params.ck());
 
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);
 
-        let prover = Prover::<InnerCurve, OuterCurve, TestPCS>::new(
+        let prover = Prover::<InnerCurve, OuterCurve, TestPCS, BenchDomain>::new(
             keyset,
             &pks_comm,
             pcs_params.clone(),
@@ -179,7 +182,7 @@ fn verification(c: &mut Criterion) {
         let proof_counting = prover.prove_counting(bitmask.clone());
 
         let create_verifier = || {
-            Verifier::<InnerCurve, OuterCurve, TestPCS>::new(
+            Verifier::<InnerCurve, OuterCurve, TestPCS, BenchDomain>::new(
                 pcs_params.raw_vk(),
                 pks_comm.clone(),
                 Transcript::new(b"apk_proof"),
