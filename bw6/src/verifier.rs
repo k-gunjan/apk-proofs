@@ -6,7 +6,7 @@ use w3f_pcs::pcs::{PcsParams, RawVerifierKey, PCS};
 use merlin::{Transcript as MerlinTranscript, TranscriptRng};
 
 use crate::{utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof, CommitmentExt};
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainError, DomainFactory, FftDomain};
 use crate::fsrng::fiat_shamir_rng;
 use crate::piop::{RegisterCommitments, RegisterEvaluations, VerifierProtocol};
 use crate::piop::affine_addition::AffineAdditionEvaluations;
@@ -53,20 +53,39 @@ where
         pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
         mut empty_transcript: Transcript,
     ) -> Self {
+        Self::try_new(verifier_key, pks_comm, empty_transcript)
+            .expect("keyset commitment names an unusable domain")
+    }
+
+    /// Fallible constructor.
+    ///
+    /// The domain size comes out of the keyset commitment, which for a bridge arrives from the
+    /// chain, so it is untrusted: it may name a size this field cannot realise, or one no field
+    /// could. Both are rejected rather than panicking.
+    pub fn try_new(
+        verifier_key: <S::Params as PcsParams>::RVK,
+        pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
+        mut empty_transcript: Transcript,
+    ) -> Result<Self, DomainError> {
         let domain_size = pks_comm.domain_size as usize;
-        let domain = D::create_domain(domain_size);
-        assert_eq!(domain.size(), domain_size);
+        let domain = D::try_create_domain(domain_size)?;
+        if domain.size() != domain_size {
+            return Err(DomainError::NotExact {
+                requested: domain_size,
+                nearest: domain.size(),
+            });
+        }
 
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(&mut empty_transcript, &domain, &verifier_key);
         <Transcript as ApkTranscript<OC::ScalarField>>::set_keyset_commitment(&mut empty_transcript, &pks_comm);
 
-        Self {
+        Ok(Self {
             domain,
             verifier_key,
             pks_comm,
             preprocessed_transcript: empty_transcript,
             _marker: std::marker::PhantomData,
-        }
+        })
     }
 
     pub fn verify_simple(

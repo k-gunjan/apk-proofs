@@ -28,7 +28,8 @@ pub mod instances;
 pub mod bls;
 pub mod domain;
 pub use domain::{
-    CooleyTukeyDomain, DomainFactory, FftDomain, NaiveDomain, Radix2Domain, SupportsPackedScheme,
+    CooleyTukeyDomain, DomainError, DomainFactory, FftDomain, NaiveDomain, Radix2Domain,
+    SupportsPackedScheme,
 };
 
 mod transcript;
@@ -252,5 +253,74 @@ mod tests {
     #[test]
     fn test_rejects_tampering_381() {
         test_helpers::test_rejects_tampering_381(252);
+    }
+
+    #[test]
+    fn test_rejects_bad_domain_size_377() {
+        test_helpers::test_rejects_bad_domain_size_377(255);
+    }
+
+    #[test]
+    fn test_rejects_bad_domain_size_381() {
+        test_helpers::test_rejects_bad_domain_size_381(252);
+    }
+
+    /// CI gate: generic code must not name a concrete curve or a radix-2 domain. Generic code
+    /// rots back into concrete code quietly, and a single reintroduced `Radix2EvaluationDomain`
+    /// would break APK-381 only at runtime, on a curve whose tests are the slowest to run.
+    #[test]
+    fn generic_code_names_no_concrete_curve_or_domain() {
+        use std::path::Path;
+
+        fn visit(dir: &Path, findings: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    visit(&path, findings);
+                    continue;
+                }
+                if path.extension().and_then(|e| e.to_str()) != Some("rs") {
+                    continue;
+                }
+                let rel = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap_or(&path);
+                let rel = rel.to_string_lossy().replace('\\', "/");
+                // Where naming a concrete curve or domain is the entire point.
+                if rel.contains("src/instances/")
+                    || rel.contains("src/domain/radix2.rs")
+                    || rel.ends_with("src/test_helpers.rs")
+                {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).unwrap();
+                // Test modules legitimately pick concrete curves to test against.
+                let production = match src.find("#[cfg(test)]") {
+                    Some(i) => &src[..i],
+                    None => &src[..],
+                };
+                // Comments may name curves freely; the point is that no *code* does.
+                let production: String = production
+                    .lines()
+                    .map(|l| l.split("//").next().unwrap_or(""))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                for needle in [
+                    "Radix2EvaluationDomain",
+                    "ark_bw6_761",
+                    "ark_bw6_767",
+                    "ark_bls12_377",
+                    "ark_bls12_381",
+                    "log_size_of_group",
+                    "TWO_ADICITY",
+                ] {
+                    if production.contains(needle) {
+                        findings.push(format!("{} names {}", rel, needle));
+                    }
+                }
+            }
+        }
+
+        let mut findings = Vec::new();
+        visit(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")), &mut findings);
+        assert!(findings.is_empty(), "generic code is not generic:\n  {}", findings.join("\n  "));
     }
 }

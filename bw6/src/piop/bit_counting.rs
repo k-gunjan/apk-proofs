@@ -1,4 +1,3 @@
-// use ark_bw6_761::Fr;
 use ark_ff::{FftField, Field, One, PrimeField, Zero};
 use ark_poly::Polynomial;
 use ark_poly::univariate::DensePolynomial;

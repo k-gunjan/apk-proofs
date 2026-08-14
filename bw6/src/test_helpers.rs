@@ -324,6 +324,69 @@ fn _test_rejects_tampering<IC, OC, S, D>(
     );
 }
 
+/// A keyset commitment arrives from the chain, so its domain size is untrusted. Neither a size
+/// the field cannot realise exactly, nor one no field could realise, may panic the verifier.
+fn _test_rejects_bad_domain_size<IC, OC, S, D>(pcs_params: S::Params, keyset_size: usize, unrealisable: u64)
+where
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField> + FftField,
+    S: PCS<OC::ScalarField>,
+    D: crate::DomainFactory<OC::ScalarField>,
+    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
+    S::Params: Clone,
+{
+    let rng = &mut test_rng();
+    let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
+    let pks_comm = keyset.commit::<S>(&pcs_params.ck());
+
+    let mut not_exact = pks_comm.clone();
+    not_exact.domain_size = unrealisable;
+    assert!(
+        matches!(
+            Verifier::<IC, OC, S, D>::try_new(pcs_params.raw_vk(), not_exact, Transcript::new(b"apk_proof")),
+            Err(crate::DomainError::NotExact { .. })
+        ),
+        "a domain size the field cannot realise exactly must be rejected"
+    );
+
+    let mut too_large = pks_comm;
+    too_large.domain_size = u64::MAX;
+    assert!(
+        matches!(
+            Verifier::<IC, OC, S, D>::try_new(pcs_params.raw_vk(), too_large, Transcript::new(b"apk_proof")),
+            Err(crate::DomainError::TooLarge { .. })
+        ),
+        "an unrealisable domain size must be rejected"
+    );
+}
+
+pub fn test_rejects_bad_domain_size_377(keyset_size: usize) {
+    use ark_bls12_377::G1Projective as InnerCurve;
+    use ark_bw6_761::{Fr, G1Projective as OuterCurve};
+
+    // 255 is not a power of two.
+    _test_rejects_bad_domain_size::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>>(
+        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
+        keyset_size,
+        255,
+    );
+}
+
+pub fn test_rejects_bad_domain_size_381(keyset_size: usize) {
+    use crate::instances::bls12_381_bw6_767::{kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve};
+
+    // 254 = 2 * 127 does not divide q - 1.
+    _test_rejects_bad_domain_size::<InnerCurve, OuterCurve, Pcs381, Domain767>(
+        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
+            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
+            &mut test_rng(),
+        ),
+        keyset_size,
+        254,
+    );
+}
+
 pub fn test_rejects_tampering_377(keyset_size: usize) {
     use ark_bls12_377::G1Projective as InnerCurve;
     use ark_bw6_761::{Fr, G1Projective as OuterCurve};

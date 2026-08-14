@@ -1,7 +1,7 @@
 use ark_ff::PrimeField;
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 
-use super::types::{DomainFactory, FftDomain};
+use super::types::{DomainError, DomainFactory, FftDomain};
 
 /// Radix-2 domain, backed by arkworks. Used by APK-377 (BW6-761 scalar field, two-adicity 46).
 ///
@@ -61,8 +61,10 @@ impl<F: PrimeField> FftDomain<F> for Radix2Domain<F> {
 impl<F: PrimeField> super::types::SupportsPackedScheme for Radix2Domain<F> {}
 
 impl<F: PrimeField> DomainFactory<F> for Radix2Domain<F> {
-    fn create_domain(size: usize) -> Self {
-        Self::new(size)
+    fn try_create_domain(size: usize) -> Result<Self, DomainError> {
+        Radix2EvaluationDomain::<F>::new(size)
+            .map(Radix2Domain)
+            .ok_or(DomainError::TooLarge { requested: size })
     }
 }
 

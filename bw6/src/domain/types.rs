@@ -100,7 +100,42 @@ pub trait FftDomain<F: PrimeField>: Clone + Sized {
 /// forces every bound to be spelled `D: FftDomain<F> + DomainFactory<Field = F>`, which is both
 /// noisy and easy to get wrong.
 pub trait DomainFactory<F: PrimeField>: FftDomain<F> {
-    fn create_domain(size: usize) -> Self;
+    /// The smallest domain of at least `size`.
+    fn try_create_domain(size: usize) -> Result<Self, DomainError>;
+
+    /// Panicking shorthand for [`try_create_domain`](Self::try_create_domain).
+    ///
+    /// Only for sizes the caller already knows are reachable. Anything derived from untrusted
+    /// input — a keyset commitment, an RPC argument — should use the fallible form.
+    fn create_domain(size: usize) -> Self {
+        Self::try_create_domain(size).expect("no evaluation domain of the requested size")
+    }
+}
+
+/// Why a domain could not be built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DomainError {
+    /// The field has no evaluation domain this large. Its multiplicative group has order
+    /// `q - 1`, so the available sizes are that number's divisors, and they run out.
+    TooLarge { requested: usize },
+    /// The field has no domain of *exactly* this size. `nearest` is the smallest one at least
+    /// as large.
+    NotExact { requested: usize, nearest: usize },
+}
+
+impl core::fmt::Display for DomainError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            DomainError::TooLarge { requested } => {
+                write!(f, "no evaluation domain of size >= {} exists in this field", requested)
+            }
+            DomainError::NotExact { requested, nearest } => write!(
+                f,
+                "no evaluation domain of size exactly {} exists in this field; the smallest at least that large is {}",
+                requested, nearest
+            ),
+        }
+    }
 }
 
 /// Marks domains that can supply the sizes the `packed` scheme needs.

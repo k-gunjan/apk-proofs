@@ -196,7 +196,7 @@ impl<F: PrimeField, D: DomainFactory<F>> Domains<F, D> {
             return None;
         }
         let k = m / n;
-        (large.element(k) == small.generator()).then(|| k)
+        (large.element(k) == small.generator()).then_some(k)
     }
 
     /// Evaluations of `p(Xw)` over the 4x domain, given `p` and its evaluations there.

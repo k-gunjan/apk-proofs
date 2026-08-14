@@ -2,7 +2,7 @@ use ark_ff::PrimeField;
 use num_bigint::BigUint;
 
 use super::naive::subgroup_generator;
-use super::types::{DomainFactory, FftDomain};
+use super::types::{DomainError, DomainFactory, FftDomain};
 
 /// Prime factors small enough that a direct O(p^2) DFT beats reducing them further.
 ///
@@ -394,14 +394,8 @@ impl<F: PrimeField> CooleyTukeyDomain<F> {
 }
 
 impl<F: PrimeField> DomainFactory<F> for CooleyTukeyDomain<F> {
-    fn create_domain(size: usize) -> Self {
-        Self::smallest_at_least(size).unwrap_or_else(|| {
-            panic!(
-                "this field has no transformable domain of size >= {}; the largest available is {:?}",
-                size,
-                admissible_sizes::<F>(MAX_ADMISSIBLE_SIZE).last()
-            )
-        })
+    fn try_create_domain(size: usize) -> Result<Self, DomainError> {
+        Self::smallest_at_least(size).ok_or(DomainError::TooLarge { requested: size })
     }
 }
 

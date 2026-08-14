@@ -97,11 +97,13 @@ mod tests {
     }
 
     /// BW6-761's scalar field has two-adicity 46, so a domain of 2^50 does not exist. The
-    /// failure now comes from the domain rather than from an assertion in this module.
+    /// failure is now a typed error from the domain rather than an assertion in this module.
     #[test]
-    #[should_panic(expected = "two-adicity")]
     fn test_insufficient_adicity() {
-        let rng = &mut test_rng();
-        let _params = generate_for_domain::<_, Fr, TestKzg, TestDomain>(2usize.pow(50), rng);
+        use crate::domain::{DomainError, DomainFactory};
+        assert_eq!(
+            TestDomain::try_create_domain(2usize.pow(50)),
+            Err(DomainError::TooLarge { requested: 2usize.pow(50) })
+        );
     }
 }

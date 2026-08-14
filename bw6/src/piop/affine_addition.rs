@@ -216,12 +216,10 @@ where
         apk_acc.resize(domain_size, apk_acc.last().cloned().unwrap());
         let mut apk_acc_x = Vec::with_capacity(apk_acc.len());
         let mut apk_acc_y = Vec::with_capacity(apk_acc.len());
-        apk_acc.iter()
-            .map(|p| {
-                apk_acc_x.push((p.x().expect("invalid point")).into()); 
-                apk_acc_y.push((p.y().expect("invalid point")).into());
-            })
-            .collect::<Vec<_>>();
+        apk_acc.iter().for_each(|p| {
+            apk_acc_x.push((p.x().expect("invalid point")).into());
+            apk_acc_y.push((p.y().expect("invalid point")).into());
+        });
 
         let mut bitmask = bitmask.to_vec();
         bitmask.resize(domain_size - 1, false);
@@ -285,14 +283,14 @@ where
         a1_lin += (b_zeta * (acc_x_zeta - pks_x_zeta) * (acc_x_zeta - pks_x_zeta), acc_x_poly);
         a1_lin += (F::one() - b_zeta, acc_y_poly);
         // a1_lin = zeta_minus_omega_inv * a1_lin // TODO: fix in arkworks
-        a1_lin.coeffs.iter_mut().for_each(|mut c| *c *= zeta_minus_omega_inv);
+        a1_lin.coeffs.iter_mut().for_each(|c| *c *= zeta_minus_omega_inv);
 
         let mut a2_lin = DensePolynomial::<F>::zero();
         a2_lin += (b_zeta * (acc_x_zeta - pks_x_zeta), acc_y_poly);
         a2_lin += (b_zeta * (acc_y_zeta - pks_y_zeta), acc_x_poly);
         a2_lin += (F::one() - b_zeta, acc_x_poly);
         // a2_lin = zeta_minus_omega_inv * a2_lin // TODO: fix in arkworks
-        a2_lin.coeffs.iter_mut().for_each(|mut c| *c *= zeta_minus_omega_inv);
+        a2_lin.coeffs.iter_mut().for_each(|c| *c *= zeta_minus_omega_inv);
 
         vec![
             a1_lin,
