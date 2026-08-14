@@ -183,6 +183,49 @@ impl<F: PrimeField, D: DomainFactory<F>> Domains<F, D> {
         domain_nx.fft(&coeffs).into()
     }
 
+    /// If `large` contains `small` as a subgroup with elements interleaved in the natural way,
+    /// returns the index ratio `k = |large| / |small|`, for which `large.element(k) == small.generator()`.
+    ///
+    /// Radix-2 domains are always nested this way. BW6-767's are never nested at ratio 4, since
+    /// 4 does not divide `q - 1` there, so every routine that would exploit nesting has to check
+    /// rather than assume. Returning the ratio rather than a bool keeps the check honest: it is
+    /// the actual rotation amount, not the literal 4 the code used to hardcode.
+    fn nesting_index(small: &D, large: &D) -> Option<usize> {
+        let (n, m) = (small.size(), large.size());
+        if n == 0 || m % n != 0 {
+            return None;
+        }
+        let k = m / n;
+        (large.element(k) == small.generator()).then(|| k)
+    }
+
+    /// Evaluations of `p(Xw)` over the 4x domain, given `p` and its evaluations there.
+    ///
+    /// `p(Xw)` represents the left circular shift of the register `p` interpolates, which the
+    /// affine-addition constraints need to relate consecutive rows.
+    pub fn shift_over_4x(&self, poly: &DensePolynomial<F>, evals_over_4x: &Evals<F>) -> Evals<F> {
+        match Self::nesting_index(&self.domain, &self.domain4x) {
+            // Nested: p(w_L^{i+k}) = p(w_L^i * w), so shifting is a rotation of the evaluation
+            // vector and costs nothing.
+            Some(k) => {
+                let mut shifted = evals_over_4x.evals.clone();
+                shifted.rotate_left(k);
+                shifted.into()
+            }
+            // Not nested: p(Xw) = sum_i (c_i w^i) X^i, so scale the coefficients and transform
+            // once more. One extra FFT, and no constraint on how the domains relate.
+            None => {
+                let mut coeffs = poly.coeffs.clone();
+                let mut power = F::one();
+                for c in coeffs.iter_mut() {
+                    *c *= power;
+                    power *= self.omega;
+                }
+                self.domain4x.fft(&coeffs).into()
+            }
+        }
+    }
+
     fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<F> {
         Self::li(0, domain_size)
     }
@@ -197,13 +240,41 @@ impl<F: PrimeField, D: DomainFactory<F>> Domains<F, D> {
         li
     }
 
-    // TODO: restore the coset fast path for radix-2 domains. When domain2x is domain nested with
-    // index 2, p(domain2x) can be computed as two n-point FFTs (p over H, interleaved with p'
-    // over H where p'(X) = p(gX)) instead of one 2n-point FFT. That interleaving is only valid
-    // under nesting, which BW6-767 does not have, so it belongs behind the domain abstraction
-    // rather than here. `test_coset_amplify` below still pins the identity it relies on.
+    /// For a polynomial p returns a polynomial p' such that p'(H) = p(gH).
+    fn coset_polynomial(poly: &DensePolynomial<F>, g: F) -> DensePolynomial<F> {
+        let coset_coeffs = poly
+            .coeffs
+            .iter()
+            .scan(F::one(), |pow, &coeff| {
+                let coset_coeff = *pow * coeff;
+                *pow *= g;
+                Some(coset_coeff)
+            })
+            .collect();
+        DensePolynomial::from_coefficients_vec(coset_coeffs)
+    }
+
+    /// Evaluations over the 2x domain, given evaluations over the base domain.
+    ///
+    /// When the domains are nested at index 2 the larger domain is `H ∪ gH`, and since
+    /// `p(gH) = p'(H)` for `p'(X) = p(gX)`, the transform can be done as two n-point FFTs whose
+    /// results interleave, rather than one 2n-point FFT. That interleaving is only valid under
+    /// nesting, so it is guarded rather than assumed; BW6-767 falls through to the general path.
     pub fn amplify_x2(&self, evals: Vec<F>) -> Evals<F> {
-        Self::_amplify(evals, &self.domain, &self.domain2x)
+        match Self::nesting_index(&self.domain, &self.domain2x) {
+            Some(2) => {
+                let poly = self.interpolate(evals.clone());
+                let coset_poly = Self::coset_polynomial(&poly, self.domain2x.generator());
+                let coset_evals = self.domain.fft(&coset_poly.coeffs);
+                evals
+                    .into_iter()
+                    .zip(coset_evals)
+                    .flat_map(|(e, ce)| [e, ce])
+                    .collect::<Vec<_>>()
+                    .into()
+            }
+            _ => Self::_amplify(evals, &self.domain, &self.domain2x),
+        }
     }
 
     pub fn amplify_x4(&self, evals: Vec<F>) -> Evals<F> {
@@ -214,7 +285,7 @@ impl<F: PrimeField, D: DomainFactory<F>> Domains<F, D> {
 #[cfg(test)]
 mod tests {
     use ark_bw6_761::Fr;
-    use ark_poly::{EvaluationDomain, Evaluations, Radix2EvaluationDomain};
+    use ark_poly::{EvaluationDomain, Evaluations, Polynomial, Radix2EvaluationDomain};
     use ark_std::{test_rng, One, UniformRand};
 
     use crate::Radix2Domain;
@@ -318,6 +389,87 @@ mod tests {
         let domains = TestDomains::new(n);
 
         assert_eq!(domains.l_last_scaled_by(c), domains.amplify(c_ln));
+    }
+
+    /// Radix-2 domains are nested at exactly the ratio the old code hardcoded as `4`.
+    #[test]
+    fn radix2_domains_are_nested() {
+        let domains = TestDomains::new(64);
+        assert_eq!(
+            TestDomains::nesting_index(&domains.domain, &domains.domain4x),
+            Some(4)
+        );
+        assert_eq!(
+            TestDomains::nesting_index(&domains.domain, &domains.domain2x),
+            Some(2)
+        );
+    }
+
+    /// Ground truth for the shift: the result must be `p(Xw)` evaluated over the 4x domain,
+    /// point by point, however it was computed.
+    #[test]
+    fn shift_over_4x_evaluates_the_shifted_polynomial() {
+        let rng = &mut test_rng();
+        let n = 64;
+        let domains = TestDomains::new(n);
+
+        let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+        let poly = domains.interpolate(evals);
+        let evals_4x = domains.amplify_polynomial(&poly);
+
+        let shifted = domains.shift_over_4x(&poly, &evals_4x);
+
+        for i in 0..domains.domain4x.size() {
+            let point = domains.domain4x.element(i) * domains.omega;
+            assert_eq!(shifted.evals[i], poly.evaluate(&point), "mismatch at index {}", i);
+        }
+    }
+
+    /// The rotation fast path and the coefficient-scaling fallback must agree. The radix-2
+    /// domain takes the rotation branch, so this pins the branch BW6-767 will actually use
+    /// against the one that is already exercised by every existing proof test.
+    #[test]
+    fn shift_fallback_agrees_with_the_rotation_fast_path() {
+        let rng = &mut test_rng();
+        let n = 64;
+        let domains = TestDomains::new(n);
+        assert!(
+            TestDomains::nesting_index(&domains.domain, &domains.domain4x).is_some(),
+            "this test is only meaningful when the fast path is taken"
+        );
+
+        let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+        let poly = domains.interpolate(evals);
+        let evals_4x = domains.amplify_polynomial(&poly);
+
+        let via_rotation = domains.shift_over_4x(&poly, &evals_4x);
+
+        // The fallback, spelled out: p(Xw) = sum_i (c_i w^i) X^i.
+        let mut coeffs = poly.coeffs.clone();
+        let mut power = Fr::one();
+        for c in coeffs.iter_mut() {
+            *c *= power;
+            power *= domains.omega;
+        }
+        let via_scaling: Evals<Fr> = domains.domain4x.fft(&coeffs).into();
+
+        assert_eq!(via_rotation, via_scaling);
+    }
+
+    /// Likewise for the coset fast path in `amplify_x2`.
+    #[test]
+    fn amplify_x2_coset_path_agrees_with_the_general_path() {
+        let rng = &mut test_rng();
+        let n = 64;
+        let domains = TestDomains::new(n);
+
+        let evals = (0..n).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+        let via_coset = domains.amplify_x2(evals.clone());
+
+        let poly = domains.interpolate(evals);
+        let via_general: Evals<Fr> = domains.domain2x.fft(&poly.coeffs).into();
+
+        assert_eq!(via_coset, via_general);
     }
 
     /// The expanded domains must be sized off the realized base size, not the requested one.

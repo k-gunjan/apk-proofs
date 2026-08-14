@@ -203,10 +203,10 @@ mod tests {
     fn subgroup_generator_has_the_claimed_order() {
         for n in [2usize, 3, 9, 11, 23, 47, 1551, 9306] {
             let w = subgroup_generator::<Fr767>(n).unwrap();
-            assert!(w.pow([n as u64]).is_one(), "w^{n} != 1");
+            assert!(w.pow([n as u64]).is_one(), "w^{} != 1", n);
             // and no smaller power of a proper divisor is 1, for the prime cases
             if n > 1 && [2usize, 3, 11, 23, 47].contains(&n) {
-                assert!(!w.is_one(), "generator collapsed to 1 for n = {n}");
+                assert!(!w.is_one(), "generator collapsed to 1 for n = {}", n);
             }
         }
     }

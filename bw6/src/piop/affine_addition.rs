@@ -366,8 +366,14 @@ where
 
         let [x1, y1] = &registers.partial_sums;
         let [x2, y2] = &registers.keyset;
-        let mut next_partial_sums = registers.partial_sums.clone();
-        next_partial_sums.iter_mut().for_each(|z| z.evals.rotate_left(4));
+        // The shifted registers, acc(Xw). Delegated because the cheap way to compute them —
+        // rotating the evaluation vector — is only valid when the domains are nested, which
+        // holds for radix-2 and never for BW6-767.
+        let [acc_x_poly, acc_y_poly] = &registers.polynomials.partial_sums;
+        let next_partial_sums = [
+            registers.domains.shift_over_4x(acc_x_poly, x1),
+            registers.domains.shift_over_4x(acc_y_poly, y1),
+        ];
         let [x3, y3] = &next_partial_sums;
 
         let c1 =
@@ -459,8 +465,16 @@ where
     pub fn compute_public_inputs_constraint_polynomials<D: DomainFactory<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) ->
     (DensePolynomial<OC::ScalarField>, DensePolynomial<OC::ScalarField>) {
         let [x1, y1] = &registers.partial_sums;
-        let [h_x, h_y] = [x1, y1].map(|z| z[0]);
-        let [apk_plus_h_x, apk_plus_h_y] = [x1, y1].map(|z| z[4 * (registers.domains.size - 1)]);
+        // The accumulator's first and last values. Reading them out of the 4x evaluation vector
+        // at index `4 * i` would assume the base domain sits inside it at stride 4 — true for
+        // radix-2, impossible for BW6-767, where 4 does not divide q - 1. Evaluating the
+        // register polynomial at w^0 and w^(n-1) is exact for any domain and costs O(n) here,
+        // against the O(n log n) transforms that dominate.
+        let [acc_x_poly, acc_y_poly] = &registers.polynomials.partial_sums;
+        let last_element = registers.domains.domain.element(registers.domains.size - 1);
+        let [h_x, h_y] = [acc_x_poly, acc_y_poly].map(|p| p.evaluate(&OC::ScalarField::one()));
+        let [apk_plus_h_x, apk_plus_h_y] =
+            [acc_x_poly, acc_y_poly].map(|p| p.evaluate(&last_element));
 
         let acc_minus_h_x = x1 - &registers.domains.constant_4x(h_x);
         let acc_minus_h_y = y1 - &registers.domains.constant_4x(h_y);
