@@ -26,7 +26,12 @@ pub mod utils;
 pub mod instances;
 
 pub mod bls;
+pub mod config;
 pub mod domain;
+pub use config::{
+    AccountablePublicInputOf, Apk, ApkConfig, Bls12_377Config, Bls12_381Config, KeysetCommitmentOf, KeysetOf, ProverOf, ScalarOf,
+    VerifierOf,
+};
 pub use domain::{
     CooleyTukeyDomain, DomainError, DomainFactory, FftDomain, NaiveDomain, Radix2Domain,
     SupportsPackedScheme,
@@ -263,6 +268,12 @@ mod tests {
     #[test]
     fn test_rejects_bad_domain_size_381() {
         test_helpers::test_rejects_bad_domain_size_381(252);
+    }
+
+    /// One function body, both curves.
+    #[test]
+    fn test_config_driven_api() {
+        test_helpers::test_config_driven_api();
     }
 
     /// CI gate: generic code must not name a concrete curve or a radix-2 domain. Generic code

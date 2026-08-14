@@ -411,3 +411,75 @@ pub fn test_rejects_tampering_381(keyset_size: usize) {
         keyset_size,
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Config-driven API
+//
+// The point of ApkConfig: one body below serves both curve configurations. Nothing in it names a
+// curve, a field, a commitment scheme or an FFT strategy — those all follow from the single type
+// parameter, and the caller selects a configuration by naming one type.
+// ---------------------------------------------------------------------------------------------
+
+/// Proves and verifies over whichever configuration `C` names.
+pub fn config_driven_roundtrip<C>(
+    pcs_params: <C::Pcs as PCS<crate::ScalarOf<C>>>::Params,
+    keyset_size: usize,
+) -> bool
+where
+    C: crate::ApkConfig,
+    crate::ScalarOf<C>:
+        From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<crate::ScalarOf<C>>>::C: CommitmentExt<
+            crate::ScalarOf<C>,
+            Affine = <C::OuterCurve as CurveGroup>::Affine,
+        > + Clone,
+    <C::Pcs as PCS<crate::ScalarOf<C>>>::Params: Clone,
+{
+    let rng = &mut test_rng();
+
+    let keyset = crate::KeysetOf::<C>::new(random_pks(keyset_size, rng));
+    let pks_comm = keyset.commit::<C::Pcs>(&pcs_params.ck());
+
+    let prover = crate::ProverOf::<C>::new(
+        keyset,
+        &pks_comm,
+        pcs_params.clone(),
+        Transcript::new(b"apk_proof"),
+    );
+    let verifier = crate::VerifierOf::<C>::new(
+        pcs_params.raw_vk(),
+        pks_comm,
+        Transcript::new(b"apk_proof"),
+    );
+
+    let bits: Vec<bool> = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect();
+    let (proof, public_input) = prover.prove_simple(Bitmask::from_bits(&bits));
+    verifier.verify_simple(&public_input, &proof)
+}
+
+/// Runs the same body over both configurations.
+pub fn test_config_driven_api() {
+    use crate::{Bls12_377Config, Bls12_381Config};
+
+    assert!(
+        config_driven_roundtrip::<Bls12_377Config>(
+            crate::config::setup_for_keyset::<Bls12_377Config, _>(255, &mut test_rng()),
+            255,
+        ),
+        "APK-377 roundtrip through the config API"
+    );
+
+    // APK-381 cannot use the generic setup helper: w3f-pcs refuses to build an SRS for a curve
+    // with this two-adicity. See instances::bls12_381_bw6_767::kzg::generate_urs.
+    use crate::instances::bls12_381_bw6_767::Domain767;
+    assert!(
+        config_driven_roundtrip::<Bls12_381Config>(
+            crate::instances::bls12_381_bw6_767::kzg::generate_urs(
+                3 * Domain767::create_domain(253).size() - 3,
+                &mut test_rng(),
+            ),
+            252,
+        ),
+        "APK-381 roundtrip through the same body"
+    );
+}
