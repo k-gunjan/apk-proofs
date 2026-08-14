@@ -28,7 +28,7 @@ pub(crate) fn random_pks<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C>
 fn _test_prove_verify<IC, OC, S, D, ProofT, PI, P, V>(
     prove: P, 
     verify: V, 
-    log_domain_size: u32, 
+    keyset_size: usize,
     proof_size: usize
 )
 where
@@ -47,10 +47,9 @@ where
     let rng = &mut test_rng();
 
     let t_setup = start_timer!(|| "setup");
-    let pcs_params = setup::generate_for_domain::<_, OC::ScalarField, S>(log_domain_size, rng);
+    let pcs_params = setup::generate_for_keyset::<_, OC::ScalarField, S, D>(keyset_size, rng);
     end_timer!(t_setup);
 
-    let keyset_size = 2usize.pow(log_domain_size) - 1;
     let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
 
     let pks_commitment_ = start_timer!(|| "signer set commitment");
@@ -92,7 +91,7 @@ where
     assert!(valid);
 }
 
-pub fn test_simple_scheme(log_domain_size: u32) {
+pub fn test_simple_scheme(keyset_size: usize) {
     use ark_bls12_377::G1Projective as InnerCurve;
     use ark_bw6_761::{G1Projective as OuterCurve, Fr};
     use crate::AccountablePublicInput;
@@ -102,12 +101,12 @@ pub fn test_simple_scheme(log_domain_size: u32) {
     _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
-        log_domain_size,
+        keyset_size,
         (5 * 2 + 6) * 48 // 5C + 6F
     );
 }
 
-pub fn test_packed_scheme(log_domain_size: u32) {
+pub fn test_packed_scheme(keyset_size: usize) {
     use ark_bls12_377::G1Projective as InnerCurve;
     use ark_bw6_761::{G1Projective as OuterCurve, Fr};
     use crate::AccountablePublicInput;
@@ -117,12 +116,12 @@ pub fn test_packed_scheme(log_domain_size: u32) {
     _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_packed(bitmask),
         |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
-        log_domain_size,
+        keyset_size,
         (8 * 2 + 9) * 48 // 8C + 9F
     );
 }
 
-pub fn test_counting_scheme(log_domain_size: u32) {
+pub fn test_counting_scheme(keyset_size: usize) {
     use ark_bls12_377::G1Projective as InnerCurve;
     use ark_bw6_761::{G1Projective as OuterCurve, Fr};
     use crate::CountingPublicInput;
@@ -132,7 +131,7 @@ pub fn test_counting_scheme(log_domain_size: u32) {
     _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, CountingPublicInput<InnerCurve>, _, _>(
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
-        log_domain_size,
+        keyset_size,
         (7 * 2 + 8) * 48 // 7C + 8F
     );
 }

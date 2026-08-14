@@ -42,8 +42,11 @@ where
 {
     /// Per-coordinate commitments to public key polynomials
     pub pks_comm: (C, C),
-    /// Log₂ of the domain size used to interpolate the vectors above.
-    pub log_domain_size: u32,
+    /// Size of the domain used to interpolate the vectors above.
+    ///
+    /// Not a log. BW6-767's scalar field has two-adicity 1, so its domain sizes are divisors of
+    /// `q - 1` rather than powers of two and cannot be recovered from an exponent.
+    pub domain_size: u64,
     _m: PhantomData<F>,
 }
 
@@ -128,7 +131,7 @@ where
         let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
-            log_domain_size: self.domain.size().trailing_zeros(),
+            domain_size: self.domain.size() as u64,
             _m: PhantomData::default(),
         }
     }

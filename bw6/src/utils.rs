@@ -1,7 +1,7 @@
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{batch_inversion, FftField, PrimeField};
 use ark_ff::{Field, Zero};
-use ark_poly::{EvaluationDomain, Polynomial, Radix2EvaluationDomain};
+use ark_poly::Polynomial;
 
 use crate::domain::FftDomain;
 use crate::Bitmask;
@@ -144,7 +144,7 @@ pub fn randomize<P, F>(
 #[cfg(test)]
 mod tests {
     use ark_ff::{Field, One};
-    use ark_poly::{Evaluations, Polynomial};
+    use ark_poly::{EvaluationDomain, Evaluations, Polynomial, Radix2EvaluationDomain};
     use ark_std::{test_rng, UniformRand};
     use ark_std::convert::TryInto;
 

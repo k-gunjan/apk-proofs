@@ -165,7 +165,7 @@ fn verification(c: &mut Criterion) {
         
         let keyset = Keyset::<InnerCurve, OuterCurve, BenchDomain>::new(pks);
         
-        let pcs_params = setup::generate_for_keyset::<_, TestPCS, _>(keyset_size, rng);
+        let pcs_params = setup::generate_for_keyset::<_, _, TestPCS, BenchDomain>(keyset_size, rng);
         let pks_comm = keyset.commit::<TestPCS>(&pcs_params.ck());
 
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);

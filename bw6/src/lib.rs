@@ -216,17 +216,17 @@ mod tests {
 
     #[test]
     fn test_simple_scheme() {
-        test_helpers::test_simple_scheme(8);
+        test_helpers::test_simple_scheme(255);
     }
 
 
     #[test]
     fn test_packed_scheme() {
-        test_helpers::test_packed_scheme(8);
+        test_helpers::test_packed_scheme(255);
     }
 
     #[test]
     fn test_counting_scheme() {
-        test_helpers::test_counting_scheme(8);
+        test_helpers::test_counting_scheme(255);
     }
 }

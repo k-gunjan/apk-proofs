@@ -53,7 +53,7 @@ where
         pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
         mut empty_transcript: Transcript,
     ) -> Self {
-        let domain_size = 2usize.pow(pks_comm.log_domain_size);
+        let domain_size = pks_comm.domain_size as usize;
         let domain = D::create_domain(domain_size);
         assert_eq!(domain.size(), domain_size);
 

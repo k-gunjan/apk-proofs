@@ -348,7 +348,7 @@ fn main() {
 
     let t_setup =
         start_timer!(|| format!("Generating PCS params to support 2^{}-1 signers", log_n));
-    let pcs_params = setup::generate_for_domain::<_, _, PcsKzgBw6_761>(log_n as u32, rng);
+    let pcs_params = setup::generate_for_domain::<_, _, PcsKzgBw6_761, apk_proofs::instances::bls12_377_bw6_761::Domain761>(1usize << log_n, rng);
     end_timer!(t_setup);
 
     let keyset_size = (1 << log_n) - 1;
