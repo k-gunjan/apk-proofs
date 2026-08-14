@@ -27,6 +27,51 @@ pub type Pcs = KZG<BW6_767>;
 /// KZG commitment (a single BW6-761 G1 point)
 pub type Commitment = KzgCommitment<BW6_767>;
 
+/// Generates a KZG structured reference string for BW6-767.
+///
+/// # Why this exists
+///
+/// `KZG::setup` cannot be used on this curve. It delegates to `URS::from_trapdoor`, which
+/// asserts `n <= 2^TWO_ADICITY`; BW6-767's scalar field has two-adicity 1, so that caps the SRS
+/// at two elements.
+///
+/// The assertion is a policy guard, not a mathematical constraint. URS generation itself is a
+/// sequence of powers of tau and one batch multiplication — no transform is involved — and the
+/// KZG operations this crate uses (commit, open, verify) are multi-scalar multiplications and
+/// pairings. Only w3f-pcs's optional Lagrangian committer key needs a radix-2 domain, and this
+/// crate never asks for one. So the SRS below is well-formed and usable; upstream simply
+/// refuses to produce it.
+///
+/// # This is a workaround
+///
+/// Shipping APK-381 against an unmodified w3f-pcs needs the assertion relaxed upstream, or
+/// scoped to `to_lagrangian`. Until then this reimplements `from_trapdoor` verbatim minus the
+/// assertion. It also means the SRS here is generated from a locally sampled trapdoor and is
+/// **toxic waste** — fine for tests, useless for anything real, exactly like `KZG::setup`.
+pub fn generate_urs<R: ark_std::rand::RngCore>(
+    max_degree: usize,
+    rng: &mut R,
+) -> w3f_pcs::pcs::kzg::urs::URS<BW6_767> {
+    use ark_ec::ScalarMul;
+    use ark_std::One;
+
+    let n1 = max_degree + 1;
+    let n2 = 2;
+    let (tau, g1, g2) = w3f_pcs::pcs::kzg::urs::URS::<BW6_767>::random_params(rng);
+
+    let mut powers_of_tau = Vec::with_capacity(n1.max(n2));
+    let mut power = OuterScalar::one();
+    for _ in 0..n1.max(n2) {
+        powers_of_tau.push(power);
+        power *= tau;
+    }
+
+    w3f_pcs::pcs::kzg::urs::URS {
+        powers_in_g1: g1.batch_mul(&powers_of_tau[..n1]),
+        powers_in_g2: g2.batch_mul(&powers_of_tau[..n2]),
+    }
+}
+
 // ============================================================================
 // Core Types with KZG
 // ============================================================================

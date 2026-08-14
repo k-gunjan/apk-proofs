@@ -7,6 +7,7 @@ use ark_std::rand::Rng;
 use w3f_pcs::pcs::{PCS, PcsParams};
 use merlin::Transcript;
 use crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761 as Pcs;
+use crate::{DomainFactory, FftDomain};
 use crate::{Bitmask, CommitmentExt, Keyset, CountingProof, PackedProof, SimpleProof, Prover, PublicInput, setup, Verifier};
 
 pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<bool> {
@@ -26,8 +27,9 @@ pub(crate) fn random_pks<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C>
 }
 
 fn _test_prove_verify<IC, OC, S, D, ProofT, PI, P, V>(
-    prove: P, 
-    verify: V, 
+    pcs_params: S::Params,
+    prove: P,
+    verify: V,
     keyset_size: usize,
     proof_size: usize
 )
@@ -45,10 +47,6 @@ where
     V: Fn(&Verifier<IC, OC, S, D>, &PI, &ProofT) -> bool,
 {
     let rng = &mut test_rng();
-
-    let t_setup = start_timer!(|| "setup");
-    let pcs_params = setup::generate_for_keyset::<_, OC::ScalarField, S, D>(keyset_size, rng);
-    end_timer!(t_setup);
 
     let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
 
@@ -99,6 +97,7 @@ pub fn test_simple_scheme(keyset_size: usize) {
     type ProofType = SimpleProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
     _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
+        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
         keyset_size,
@@ -114,6 +113,7 @@ pub fn test_packed_scheme(keyset_size: usize) {
     type ProofType = PackedProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
     _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
+        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
         |prover, bitmask| prover.prove_packed(bitmask),
         |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
         keyset_size,
@@ -129,9 +129,95 @@ pub fn test_counting_scheme(keyset_size: usize) {
     type ProofType = CountingProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
 
     _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, CountingPublicInput<InnerCurve>, _, _>(
+        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
         keyset_size,
         (7 * 2 + 8) * 48 // 7C + 8F
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// APK-381: BLS12-381 / BW6-767
+//
+// The same protocol over a scalar field with two-adicity 1, so every domain is a divisor of
+// 2 * 3^2 * 11 * 23 * 47 and none is a multiple of 4.
+//
+// Proofs are slightly LARGER than APK-377's, by one byte per group element. Field elements
+// match at 48 bytes (BW6-767's scalar field is 381 bits, BW6-761's 377), but a compressed G1
+// point takes 97 bytes here against 96 there: BW6-767's base field is 767 bits, which fills 96
+// bytes to within one spare bit, leaving no room for the two flags arkworks needs for the
+// infinity marker and the y-sign, so the encoding spills into a 97th byte. BW6-761's 761-bit
+// base field leaves seven spare bits and stays at 96.
+//
+// `packed` is absent on purpose — it hardcodes 256-bit bitmask chunks and so needs 256 | n,
+// which no BW6-767 domain satisfies.
+// ---------------------------------------------------------------------------------------------
+
+pub fn test_simple_scheme_381(keyset_size: usize) {
+    use crate::instances::bls12_381_bw6_767::{
+        kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve, OuterScalar,
+    };
+    use crate::AccountablePublicInput;
+
+    type ProofType = SimpleProof<
+        OuterScalar,
+        ark_bw6_767::G1Affine,
+        w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_767::BW6_767>,
+        ark_bw6_767::G1Affine,
+    >;
+
+    _test_prove_verify::<
+        InnerCurve,
+        OuterCurve,
+        Pcs381,
+        Domain767,
+        ProofType,
+        AccountablePublicInput<InnerCurve>,
+        _,
+        _,
+    >(
+        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
+            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
+            &mut test_rng(),
+        ),
+        |prover, bitmask| prover.prove_simple(bitmask),
+        |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
+        keyset_size,
+        5 * 97 + 6 * 48, // 5C + 6F
+    );
+}
+
+pub fn test_counting_scheme_381(keyset_size: usize) {
+    use crate::instances::bls12_381_bw6_767::{
+        kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve, OuterScalar,
+    };
+    use crate::CountingPublicInput;
+
+    type ProofType = CountingProof<
+        OuterScalar,
+        ark_bw6_767::G1Affine,
+        w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_767::BW6_767>,
+        ark_bw6_767::G1Affine,
+    >;
+
+    _test_prove_verify::<
+        InnerCurve,
+        OuterCurve,
+        Pcs381,
+        Domain767,
+        ProofType,
+        CountingPublicInput<InnerCurve>,
+        _,
+        _,
+    >(
+        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
+            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
+            &mut test_rng(),
+        ),
+        |prover, bitmask| prover.prove_counting(bitmask),
+        |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
+        keyset_size,
+        7 * 97 + 8 * 48, // 7C + 8F
     );
 }

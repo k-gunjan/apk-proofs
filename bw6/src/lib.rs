@@ -27,7 +27,7 @@ pub mod instances;
 
 pub mod bls;
 pub mod domain;
-pub use domain::{DomainFactory, FftDomain, NaiveDomain, Radix2Domain};
+pub use domain::{CooleyTukeyDomain, DomainFactory, FftDomain, NaiveDomain, Radix2Domain};
 
 mod transcript;
 
@@ -228,5 +228,17 @@ mod tests {
     #[test]
     fn test_counting_scheme() {
         test_helpers::test_counting_scheme(255);
+    }
+
+    // APK-381. 252 keys need a domain of at least 253, which is 11 * 23 exactly; the expanded
+    // domains are then 506 and 1034. None is a power of two, and none is a multiple of 4.
+    #[test]
+    fn test_simple_scheme_381() {
+        test_helpers::test_simple_scheme_381(252);
+    }
+
+    #[test]
+    fn test_counting_scheme_381() {
+        test_helpers::test_counting_scheme_381(252);
     }
 }

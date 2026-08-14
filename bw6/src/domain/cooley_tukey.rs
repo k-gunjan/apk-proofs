@@ -1,7 +1,8 @@
 use ark_ff::PrimeField;
+use num_bigint::BigUint;
 
 use super::naive::subgroup_generator;
-use super::types::FftDomain;
+use super::types::{DomainFactory, FftDomain};
 
 /// Prime factors small enough that a direct O(p^2) DFT beats reducing them further.
 ///
@@ -174,6 +175,89 @@ impl<F: PrimeField> CooleyTukeyDomain<F> {
             size_inv,
             fwd: Plan::build(size, w, &factors),
             inv: Plan::build(size, w_inv, &factors),
+        })
+    }
+}
+
+/// An upper bound on the domain sizes worth enumerating.
+///
+/// Only needed to keep the search finite for 2-adic fields, where the smooth part of `q - 1` is
+/// astronomically large: BW6-761's contains 2^46 on its own. It is far above any size the
+/// prover could afford to transform.
+const MAX_ADMISSIBLE_SIZE: usize = 1 << 32;
+
+/// The prime powers `p^e || q - 1` for primes small enough to transform directly.
+///
+/// Trial division by every integer up to the radix bound is correct without a primality test,
+/// since a composite's prime factors are removed before it is reached.
+fn usable_prime_powers<F: PrimeField>() -> Vec<(usize, u32)> {
+    let mut order: BigUint = Into::<BigUint>::into(F::MODULUS) - 1u8;
+    let mut powers = Vec::new();
+    for p in 2..=MAX_DIRECT_RADIX {
+        let big_p = BigUint::from(p);
+        let mut e = 0;
+        while (&order % &big_p) == BigUint::from(0u32) {
+            order /= &big_p;
+            e += 1;
+        }
+        if e > 0 {
+            powers.push((p, e));
+        }
+    }
+    powers
+}
+
+/// Every domain size this backend can build, ascending.
+///
+/// These are the divisors of the usable smooth part of `q - 1`. For BW6-767's scalar field that
+/// is `2 * 3^2 * 11 * 23 * 47 = 214038`, so 48 sizes — the sparseness is a property of the
+/// field, not of this code, and is why a caller asking for `n` can be handed noticeably more.
+pub fn admissible_sizes<F: PrimeField>(max: usize) -> Vec<usize> {
+    let max = max.min(MAX_ADMISSIBLE_SIZE);
+    let mut sizes = vec![1usize];
+    for (p, e) in usable_prime_powers::<F>() {
+        let mut next = Vec::new();
+        for &s in &sizes {
+            let mut v = s;
+            for _ in 0..=e {
+                if v > max {
+                    break;
+                }
+                next.push(v);
+                v = v.saturating_mul(p);
+            }
+        }
+        next.sort_unstable();
+        next.dedup();
+        sizes = next;
+    }
+    sizes
+}
+
+impl<F: PrimeField> CooleyTukeyDomain<F> {
+    /// The smallest constructible domain of at least `min_size`.
+    ///
+    /// Returns `None` when the field offers no such size, which for BW6-767 happens above
+    /// roughly 53,500: the largest 10177-free divisor of `q - 1` is 214038, and the PIOP needs
+    /// a domain of at least `4n - 2`. Getting past that needs Rader's algorithm for the 10177
+    /// factor.
+    pub fn smallest_at_least(min_size: usize) -> Option<Self> {
+        let ceiling = min_size.saturating_mul(64).max(1024);
+        admissible_sizes::<F>(ceiling)
+            .into_iter()
+            .find(|&n| n >= min_size)
+            .and_then(Self::new)
+    }
+}
+
+impl<F: PrimeField> DomainFactory<F> for CooleyTukeyDomain<F> {
+    fn create_domain(size: usize) -> Self {
+        Self::smallest_at_least(size).unwrap_or_else(|| {
+            panic!(
+                "this field has no transformable domain of size >= {}; the largest available is {:?}",
+                size,
+                admissible_sizes::<F>(MAX_ADMISSIBLE_SIZE).last()
+            )
         })
     }
 }
