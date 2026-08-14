@@ -243,4 +243,14 @@ mod tests {
     fn test_counting_scheme_381() {
         test_helpers::test_counting_scheme_381(252);
     }
+
+    #[test]
+    fn test_rejects_tampering_377() {
+        test_helpers::test_rejects_tampering_377(255);
+    }
+
+    #[test]
+    fn test_rejects_tampering_381() {
+        test_helpers::test_rejects_tampering_381(252);
+    }
 }

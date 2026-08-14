@@ -91,18 +91,18 @@ where
             partial_sums: proof.register_evaluations.partial_sums,
         };
 
-        self.validate_evaluations(
-            proof, 
-            &evaluations_with_bitmask, 
-            &challenges, 
-            &mut fsrng, 
-            &evals_at_zeta
+        let openings_valid = self.validate_evaluations(
+            proof,
+            &evaluations_with_bitmask,
+            &challenges,
+            &mut fsrng,
+            &evals_at_zeta,
         );
 
         let apk = public_input.apk;
         let constraint_polynomial_evals = evaluations_with_bitmask.evaluate_constraint_polynomials::<IC, OC>(&apk, &evals_at_zeta);
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
-        proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial
+        openings_valid && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial)
     }
 
     pub fn verify_packed(
@@ -117,12 +117,12 @@ where
         );
         let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, &self.domain);
 
-        self.validate_evaluations(
-            proof, 
-            &proof.register_evaluations, 
-            &challenges, 
-            &mut fsrng, 
-            &evals_at_zeta
+        let openings_valid = self.validate_evaluations(
+            proof,
+            &proof.register_evaluations,
+            &challenges,
+            &mut fsrng,
+            &evals_at_zeta,
         );
 
         let apk = public_input.apk;
@@ -134,7 +134,7 @@ where
             self.domain.size() as u64
         );
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
-        proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial
+        openings_valid && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial)
     }
 
     pub fn verify_counting(
@@ -151,12 +151,12 @@ where
         let evals_at_zeta = utils::lagrange_evaluations(challenges.zeta, &self.domain);
         let count = OC::ScalarField::from(public_input.count as u32);
 
-        self.validate_evaluations(
-            proof, 
-            &proof.register_evaluations, 
-            &challenges, 
-            &mut fsrng, 
-            &evals_at_zeta
+        let openings_valid = self.validate_evaluations(
+            proof,
+            &proof.register_evaluations,
+            &challenges,
+            &mut fsrng,
+            &evals_at_zeta,
         );
 
         let apk = public_input.apk;
@@ -166,7 +166,7 @@ where
             &evals_at_zeta
         );
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
-        proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial
+        openings_valid && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial)
     }
 
     fn validate_evaluations<E, C, AC, P>(
@@ -176,7 +176,7 @@ where
         challenges: &Challenges<OC::ScalarField>,
         fsrng: &mut TranscriptRng,
         evals_at_zeta: &LagrangeEvaluations<OC::ScalarField>,
-    )
+    ) -> bool
     where
         E: RegisterEvaluations<OC::ScalarField>,
         C: RegisterCommitments<OC::Affine>,
@@ -240,9 +240,11 @@ where
             fsrng,  // Use the transcript RNG for randomness
         ).is_ok();
         
-        assert!(verified, "PCS batch verification failed");
         end_timer!(t_batch_opening);
         end_timer!(t_pcs);
+        // Returned rather than asserted: proofs come from untrusted sources, so a failed
+        // opening check is an invalid proof to reject, not a reason to abort the process.
+        verified
     }
 
     fn restore_challenges<E, C, AC>(

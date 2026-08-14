@@ -1,4 +1,4 @@
-use ark_ec::CurveGroup;
+use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::FftField;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{One, test_rng, Zero};
@@ -240,3 +240,111 @@ pub fn test_counting_scheme_381(keyset_size: usize) {
 /// }
 /// ```
 pub fn _packed_scheme_is_gated_to_apk_377() {}
+
+// ---------------------------------------------------------------------------------------------
+// Negative tests
+//
+// Everything above checks that an honest proof verifies. These check that dishonest ones do not,
+// which is the property that actually matters and the one a refactor is most likely to break
+// silently: a verifier that ignores part of its input still passes every positive test.
+// ---------------------------------------------------------------------------------------------
+
+/// Builds an honest prover/verifier pair, then asserts that verification fails once the claim
+/// no longer matches the proof.
+fn _test_rejects_tampering<IC, OC, S, D>(
+    pcs_params: S::Params,
+    keyset_size: usize,
+) where
+    IC: CurveGroup,
+    OC: CurveGroup,
+    OC::ScalarField: From<IC::BaseField> + FftField,
+    S: PCS<OC::ScalarField>,
+    D: crate::DomainFactory<OC::ScalarField>,
+    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
+    S::Params: Clone,
+{
+    let rng = &mut test_rng();
+
+    let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
+    let pks_comm = keyset.commit::<S>(&pcs_params.ck());
+    let prover = Prover::<IC, OC, S, D>::new(
+        keyset,
+        &pks_comm,
+        pcs_params.clone(),
+        Transcript::new(b"apk_proof"),
+    );
+    let verifier = Verifier::<IC, OC, S, D>::new(
+        pcs_params.raw_vk(),
+        pks_comm.clone(),
+        Transcript::new(b"apk_proof"),
+    );
+
+    let bits: Vec<bool> = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect();
+    let (proof, public_input) = prover.prove_simple(Bitmask::from_bits(&bits));
+
+    // Sanity: the honest claim verifies, so any failure below is caused by the tampering.
+    assert!(
+        verifier.verify_simple(&public_input, &proof),
+        "the honest proof must verify"
+    );
+
+    // Flipping a bit changes the claimed signer set. The bitmask feeds the transcript, so this
+    // moves every challenge, and it also breaks the aggregate-key relation.
+    let mut flipped = bits.clone();
+    flipped[0] = !flipped[0];
+    let tampered = crate::AccountablePublicInput::<IC>::new(&public_input.apk, &Bitmask::from_bits(&flipped));
+    assert!(
+        !verifier.verify_simple(&tampered, &proof),
+        "a proof must not verify against a different bitmask"
+    );
+
+    // Claiming a different aggregate key for the same bitmask.
+    let wrong_apk = crate::AccountablePublicInput::<IC>::new(
+        &(public_input.apk.into_group() + IC::generator()).into_affine(),
+        &Bitmask::from_bits(&bits),
+    );
+    assert!(
+        !verifier.verify_simple(&wrong_apk, &proof),
+        "a proof must not verify against a different aggregate key"
+    );
+
+    // A verifier that disagrees with the prover about the domain must reject. This is what the
+    // domain size and generator in the transcript are for: without them the two sides could
+    // silently be working over different domains.
+    let mut wrong_domain_comm = pks_comm;
+    wrong_domain_comm.domain_size *= 2;
+    let wrong_domain_verifier = Verifier::<IC, OC, S, D>::new(
+        pcs_params.raw_vk(),
+        wrong_domain_comm,
+        Transcript::new(b"apk_proof"),
+    );
+    assert!(
+        !wrong_domain_verifier.verify_simple(&public_input, &proof),
+        "a proof must not verify against a verifier using a different domain"
+    );
+}
+
+pub fn test_rejects_tampering_377(keyset_size: usize) {
+    use ark_bls12_377::G1Projective as InnerCurve;
+    use ark_bw6_761::{Fr, G1Projective as OuterCurve};
+
+    _test_rejects_tampering::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>>(
+        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(
+            keyset_size,
+            &mut test_rng(),
+        ),
+        keyset_size,
+    );
+}
+
+pub fn test_rejects_tampering_381(keyset_size: usize) {
+    use crate::instances::bls12_381_bw6_767::{kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve};
+
+    _test_rejects_tampering::<InnerCurve, OuterCurve, Pcs381, Domain767>(
+        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
+            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
+            &mut test_rng(),
+        ),
+        keyset_size,
+    );
+}
