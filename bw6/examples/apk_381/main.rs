@@ -7,6 +7,7 @@ use ark_ec::AffineRepr;
 use ark_serialize::CanonicalSerialize;
 use ark_std::{end_timer, start_timer, test_rng};
 use w3f_pcs::pcs::PcsParams;
+use apk_proofs::instances::bls12_381_bw6_767::Domain767;
 use merlin::Transcript;
 use rand::Rng;
 use apk_proofs::bls::{PublicKey, SecretKey, Signature};
@@ -305,7 +306,15 @@ fn main() {
 
     let t_setup =
         start_timer!(|| format!("Generating PCS params to support 2^{}-1 signers", log_n));
-    let pcs_params = setup::generate_for_domain::<_, _, Pcs, apk_proofs::instances::bls12_381_bw6_767::Domain767>(1usize << log_n, rng);
+    // Not `setup::generate_for_domain`: that routes through w3f-pcs's KZG::setup, whose URS
+    // generator asserts `n <= 2^TWO_ADICITY`. BW6-767's scalar field has two-adicity 1, so that
+    // caps the SRS at two elements. See instances::bls12_381_bw6_767::kzg::generate_urs for why
+    // the assertion is a policy guard rather than a real constraint.
+    let domain_size = <Domain767 as apk_proofs::DomainFactory<OuterScalar>>::create_domain(
+        (1usize << log_n) + 1,
+    );
+    let max_degree = 3 * apk_proofs::FftDomain::size(&domain_size) - 3;
+    let pcs_params = apk_proofs::instances::bls12_381_bw6_767::kzg::generate_urs(max_degree, rng);
     end_timer!(t_setup);
 
     let keyset_size = (1 << log_n) - 1;
