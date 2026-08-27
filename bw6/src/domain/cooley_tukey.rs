@@ -81,11 +81,14 @@ impl<F: PrimeField> Plan<F> {
     fn build(n: usize, w: F, factors: &[usize]) -> Option<Self> {
         debug_assert_eq!(factors.iter().product::<usize>(), n);
 
-        if n <= MAX_DIRECT_RADIX {
-            return Some(Plan::Direct { n, w });
-        }
+        // Only a single prime factor bottoms out. A composite always splits, however small:
+        // `MAX_DIRECT_RADIX` bounds the largest *prime* worth transforming directly, and using
+        // it as a recursion cutoff too would end a power-of-two chain in a 64-point O(n^2) DFT
+        // (63^2 multiplications) where six more radix-2 stages cost about 192.
         if factors.len() <= 1 {
-            // A single prime above the direct-DFT bound.
+            if n <= MAX_DIRECT_RADIX {
+                return Some(Plan::Direct { n, w });
+            }
             return Self::build_rader(n, w);
         }
 
@@ -742,5 +745,45 @@ mod coverage {
             sizes.iter().any(|&m| m >= 4 * base - 2),
             "the PIOP also needs a domain of at least 4N - 2"
         );
+    }
+}
+
+#[cfg(test)]
+mod vs_radix2 {
+    use super::*;
+    use crate::Radix2Domain;
+    use ark_std::{test_rng, UniformRand};
+    use std::time::Instant;
+
+    type Fr761 = ark_bw6_761::Fr;
+
+    /// Would one generalised Cooley-Tukey backend do for both curves? Radix-2 is just the case
+    /// where every factor is 2, so it is correct; the question is what it costs against
+    /// arkworks' specialised implementation.
+    #[test]
+    #[ignore = "timing-dependent; informational"]
+    fn cost_of_replacing_arkworks_radix2() {
+        let rng = &mut test_rng();
+        for k in [8u32, 10, 12, 14, 16] {
+            let n = 1usize << k;
+            let coeffs: Vec<Fr761> = (0..n).map(|_| Fr761::rand(rng)).collect();
+
+            let ct = CooleyTukeyDomain::<Fr761>::new(n).unwrap();
+            let r2 = Radix2Domain::<Fr761>::new(n);
+
+            let t = Instant::now();
+            let a = ct.fft(&coeffs);
+            let ct_us = t.elapsed().as_micros().max(1);
+
+            let t = Instant::now();
+            let b = r2.fft(&coeffs);
+            let r2_us = t.elapsed().as_micros().max(1);
+
+            assert_eq!(a, b, "the two backends must agree at n = {}", n);
+            println!(
+                "n = 2^{:<2} = {:>6}: generic CT {:>9} us, arkworks radix-2 {:>7} us  -> {:>6.1}x slower",
+                k, n, ct_us, r2_us, ct_us as f64 / r2_us as f64
+            );
+        }
     }
 }
