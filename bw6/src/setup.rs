@@ -2,7 +2,7 @@ use ark_ff::PrimeField;
 use rand::Rng;
 use w3f_pcs::pcs::{CommitterKey, PcsParams, PCS};
 
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 
 /// Generate PCS parameters for a keyset of the given size.
 pub fn generate_for_keyset<R, F, S, D>(keyset_size: usize, rng: &mut R) -> S::Params
@@ -10,7 +10,7 @@ where
     R: Rng,
     F: PrimeField,
     S: PCS<F>,
-    D: DomainFactory<F>,
+    D: DomainSet<F>,
 {
     // The additional slot is occupied by the affine addition accumulator's initial value.
     generate_for_domain::<R, F, S, D>(keyset_size + 1, rng)
@@ -18,19 +18,22 @@ where
 
 /// Generate PCS parameters sufficient for a domain of at least `min_domain_size`.
 ///
-/// The domain, not the caller, decides the realized size: `create_domain` rounds up to the next
-/// size the field supports, and the SRS is sized against that. Whether such a domain exists at
-/// all is the domain implementation's business — for a radix-2 field that is a two-adicity
+/// The domain set, not the caller, decides the realized size: `for_min_size` rounds up to the
+/// next size the field supports, and the SRS is sized against that. Whether such a domain exists
+/// at all is the domain implementation's business — for a radix-2 field that is a two-adicity
 /// question, for BW6-767 it is a question of which divisors of `q - 1` are reachable — so the
-/// failure surfaces from `create_domain` rather than from a two-adicity assertion here.
+/// failure surfaces from `for_min_size` rather than from a two-adicity assertion here.
 pub fn generate_for_domain<R, F, S, D>(min_domain_size: usize, rng: &mut R) -> S::Params
 where
     R: Rng,
     F: PrimeField,
     S: PCS<F>,
-    D: DomainFactory<F>,
+    D: DomainSet<F>,
 {
-    let domain_size = D::create_domain(min_domain_size).size();
+    let domain_size = D::for_min_size(min_domain_size)
+        .expect("no evaluation domain of the requested size")
+        .base()
+        .size();
     S::setup(highest_degree_to_commit(domain_size), rng)
 }
 
@@ -54,13 +57,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Radix2Domain;
+    use crate::domain::Radix2DomainSet;
     use ark_bw6_761::{Fr, BW6_761};
     use ark_std::test_rng;
     use w3f_pcs::pcs::kzg::KZG;
 
     type TestKzg = KZG<BW6_761>;
-    type TestDomain = Radix2Domain<Fr>;
+    type TestDomain = Radix2DomainSet<Fr>;
 
     #[test]
     fn test_generate_for_domain() {
@@ -100,10 +103,10 @@ mod tests {
     /// failure is now a typed error from the domain rather than an assertion in this module.
     #[test]
     fn test_insufficient_adicity() {
-        use crate::domain::{DomainError, DomainFactory};
+        use crate::domain::{DomainError, DomainSet};
         assert_eq!(
-            TestDomain::try_create_domain(2usize.pow(50)),
-            Err(DomainError::TooLarge { requested: 2usize.pow(50) })
+            TestDomain::for_min_size(2usize.pow(50)).err(),
+            Some(DomainError::TooLarge { requested: 2usize.pow(50) })
         );
     }
 }

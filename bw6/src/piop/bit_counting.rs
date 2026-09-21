@@ -5,7 +5,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::iter::once;
 
 use crate::Bitmask;
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
 
 // This "gadget" is used in the 'counting' scheme to constraint the number of set bits in the bitmask.
@@ -28,13 +28,13 @@ use crate::domains::Domains;
 // To check this constraint holds, the verifier doesn't need to check C(Z) = Q(Z)(Z^n - 1), it could just check C(zeta) = 0,
 // But we use the former check not to handle this case differently.
 
-pub(crate) struct BitCountingRegisters<F: PrimeField, D: DomainFactory<F>> {
+pub(crate) struct BitCountingRegisters<F: PrimeField, D: DomainSet<F>> {
     domains: Domains<F, D>,
     bitmask: Vec<F>,
     partial_counts: DensePolynomial<F>,
 }
 
-impl<F: PrimeField, D: DomainFactory<F>> BitCountingRegisters<F, D> {
+impl<F: PrimeField, D: DomainSet<F>> BitCountingRegisters<F, D> {
     pub fn new(domains: Domains<F, D>, bitmask: &Bitmask) -> Self {
         let mut bitmask = bitmask.to_bits_as_field_elements();
         bitmask.resize_with(domains.size, || F::zero());
@@ -101,7 +101,7 @@ struct BitmaskEndsWithZero {}
 impl BitmaskEndsWithZero {
 
     // C = b * L_{n-1}
-    fn constraint_poly<F: PrimeField, D: DomainFactory<F>>(registers: &BitCountingRegisters<F, D>) -> DensePolynomial<F> {
+    fn constraint_poly<F: PrimeField, D: DomainSet<F>>(registers: &BitCountingRegisters<F, D>) -> DensePolynomial<F> {
         let n = registers.domains.size;
         let mut ln = vec![F::zero(); n];
         ln[n-1] = F::one();
@@ -135,7 +135,7 @@ impl BitCount {
     }
 
     // Though the constraint is zero, the verifier still needs the opening of the register in zeta * omega.
-    fn linearization<F: PrimeField, D: DomainFactory<F>>(registers: &BitCountingRegisters<F, D>) -> DensePolynomial<F> {
+    fn linearization<F: PrimeField, D: DomainSet<F>>(registers: &BitCountingRegisters<F, D>) -> DensePolynomial<F> {
         registers.get_partial_counts_polynomial()
     }
 
@@ -179,7 +179,7 @@ impl<F: FftField> BitCountingEvaluation<F> {
 
 #[cfg(test)]
 mod tests {
-    type TestDomain = crate::Radix2Domain<ark_bw6_761::Fr>;
+    type TestDomain = crate::Radix2DomainSet<ark_bw6_761::Fr>;
     type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
@@ -220,7 +220,7 @@ mod tests {
         let acc_z = registers.evaluate_partial_counts_register(z);
         let acc_zw = registers.get_partial_counts_polynomial().evaluate(&(z * w));
         let bitmask_z = registers.get_bitmask_polynomial().evaluate(&z);
-        let domain_z = utils::lagrange_evaluations(z, &domains.domain);
+        let domain_z = utils::lagrange_evaluations(z, domains.domain());
 
         let x_full = BitCount::constraint_poly::<Fr>();
         let x_lin = BitCount::linearization(&registers);
@@ -230,7 +230,7 @@ mod tests {
 
         assert_eq!(x_eval_full, x_full.evaluate(&z));
         assert_eq!(x_eval_full, x_eval_main + x_lin_zw);
-        assert!(domains.domain.divide_by_vanishing_poly(&x_full).1.is_zero()); // actually x_full is 0 over the field
+        assert!(domains.domain().divide_by_vanishing_poly(&x_full).1.is_zero()); // actually x_full is 0 over the field
     }
 
     #[test]
@@ -238,7 +238,7 @@ mod tests {
         let rng = &mut test_rng();
         let n = 16;
         let domains = TestDomains::new(n);
-        let domain = domains.domain;
+        let domain = domains.domain().clone();
 
         let bits = _random_bits(n, 2.0 / 3.0, rng);
 

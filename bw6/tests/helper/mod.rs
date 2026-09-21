@@ -1,15 +1,20 @@
 use std::env;
 
-pub fn parse_args_or(def_log_n: u32, scheme: &str) -> u32 {
-    let arg1 = env::args().skip(1).next();
-    match arg1 {
+/// Parses a validator-set size from the command line.
+///
+/// Deliberately not a `log_n`: what the caller has is a number of validators, and which
+/// evaluation domain that implies is the configuration's business. On APK-381 no domain is a
+/// power of two, so a logarithm would name nothing.
+pub fn parse_args_or(default_validators: usize, scheme: &str) -> usize {
+    match env::args().nth(1) {
         None => {
-            println!("LOG_N parameter is not provided, using the default.\n\
-            Run with '--test {} LOG_N', where LOG_N is the domain size binary log", scheme);
-            def_log_n
+            println!(
+                "VALIDATORS parameter is not provided, using the default.\n\
+                 Run with '--test {} VALIDATORS', where VALIDATORS is the validator set size",
+                scheme
+            );
+            default_validators
         }
-        Some(arg_log_n) => {
-            arg_log_n.parse().expect(&format!("{} is not a valid parameter", arg_log_n))
-        }
+        Some(arg) => arg.parse().unwrap_or_else(|_| panic!("{} is not a valid parameter", arg)),
     }
 }

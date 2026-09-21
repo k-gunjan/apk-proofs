@@ -5,7 +5,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
 use crate::{utils, Bitmask, CountingPublicInput, Keyset};
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
 use crate::piop::{ProverProtocol, RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsAndBitmaskCommitments, PartialSumsAndBitmaskPolynomials};
@@ -60,7 +60,7 @@ impl<F: FftField> RegisterEvaluations<F> for CountingEvaluations<F> {
     }
 }
 
-pub struct CountingScheme<F: PrimeField, D: DomainFactory<F>> {
+pub struct CountingScheme<F: PrimeField, D: DomainSet<F>> {
     affine_addition_registers: AffineAdditionRegisters<F, D>,
     bit_counting_registers: BitCountingRegisters<F, D>,
     register_evaluations: Option<CountingEvaluations<F>>,
@@ -72,7 +72,7 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     type P1 = CountingPolynomials<OC::ScalarField>;
     type P2 = ();
@@ -179,7 +179,7 @@ impl<F: FftField> CountingEvaluations<F> {
 
 #[cfg(test)]
 mod tests {
-    type TestDomain = crate::Radix2Domain<ark_bw6_761::Fr>;
+    type TestDomain = crate::Radix2DomainSet<ark_bw6_761::Fr>;
     type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};

@@ -7,7 +7,7 @@ use ark_std::{end_timer, start_timer};
 use w3f_pcs::pcs::PCS;
 
 use crate::{Bitmask, utils};
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::{Domains, Evals};
 use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, PartialSumsAndBitmaskCommitments};
@@ -226,7 +226,7 @@ pub(crate) fn evaluate_multipacking_mask_constraint_linearized<F: PrimeField>(
 }
 
 
-pub(crate) struct BitmaskPackingRegisters<F: PrimeField, D: DomainFactory<F>> {
+pub(crate) struct BitmaskPackingRegisters<F: PrimeField, D: DomainSet<F>> {
     domains: Domains<F, D>,
 
     bitmask: Evals<F>,
@@ -240,7 +240,7 @@ pub(crate) struct BitmaskPackingRegisters<F: PrimeField, D: DomainFactory<F>> {
     r: F,
 }
 
-impl<F: PrimeField, D: DomainFactory<F>> BitmaskPackingRegisters<F, D> {
+impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
 
     // TODO: remove bitmask arg
     pub fn new(domains: Domains<F, D>,
@@ -363,7 +363,7 @@ impl<F: PrimeField, D: DomainFactory<F>> BitmaskPackingRegisters<F, D> {
 
 
 
-impl<F: PrimeField, D: DomainFactory<F>> BitmaskPackingRegisters<F, D> {
+impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
     pub fn evaluate_register_polynomials(&self, point: F) -> (F, F) {
         //TODO: struct
         (
@@ -392,13 +392,13 @@ impl<F: PrimeField, D: DomainFactory<F>> BitmaskPackingRegisters<F, D> {
 
 #[cfg(test)]
 mod tests {
-    type TestDomain = crate::Radix2Domain<ark_bw6_761::Fr>;
+    type TestDomain = crate::Radix2DomainSet<ark_bw6_761::Fr>;
     type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
     use ark_bw6_761::Fr;
 
-    use crate::domain::{DomainFactory, FftDomain};
+    use crate::domain::{DomainSet, FftDomain};
 use crate::domains::{Domains, Evals};
     use crate::test_helpers::_random_bits;
 

@@ -7,7 +7,7 @@ use w3f_pcs::pcs::Commitment;
 use w3f_pcs::pcs::{CommitterKey, PCS};
 use std::marker::PhantomData;
 use crate::hash_to_curve;
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::{Domains, Evals};
 
 // Polynomial commitment to the vector of public keys.
@@ -56,14 +56,14 @@ where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     // Actual public keys, no padding.
     pub pks: Vec<IC>,
     // Interpolations of the coordinate vectors of the public key vector WITH padding.
     pub pks_polys: [DensePolynomial<OC::ScalarField>; 2],
-    // Domain used to compute the interpolations above.
-    pub domain: D,
+    // The domains used to compute the interpolations above, and to expand them.
+    pub domains: D,
     // Polynomials above, evaluated over a 4-times larger domain.
     // Used by the prover to populate the AIR execution trace.
     pub pks_evals_x4: Option<[Evals<OC::ScalarField>; 2]>,
@@ -74,11 +74,13 @@ where
     IC: CurveGroup,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     pub fn new(pks: Vec<IC>) -> Self {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        let domain = D::create_domain(min_domain_size);
+        let domains = D::for_min_size(min_domain_size)
+            .expect("no evaluation domain large enough for this keyset");
+        let domain = domains.base();
 
         let mut padded_pks = pks.clone();
         // a point with unknown discrete log
@@ -99,7 +101,7 @@ where
         let pks_y_poly = DensePolynomial::from_coefficients_vec(domain.interpolate(&pks_y));
         Self {
             pks,
-            domain,
+            domains,
             pks_polys: [pks_x_poly, pks_y_poly],
             pks_evals_x4: None,
         }
@@ -110,8 +112,13 @@ where
         self.pks.len()
     }
 
+    /// The trace domain the public keys were interpolated over.
+    pub fn domain(&self) -> &D::Domain {
+        self.domains.base()
+    }
+
     pub fn amplify(&mut self) {
-        let domains = Domains::<OC::ScalarField, D>::new(self.domain.size());
+        let domains = Domains::<OC::ScalarField, D>::from_set(self.domains.clone());
         let pks_evals_x4 = self
             .pks_polys
             .clone()
@@ -126,12 +133,12 @@ where
     where 
         S: PCS<OC::ScalarField>
     {
-        assert!(self.domain.size() <= kzg_pk.max_degree() + 1);
+        assert!(self.domain().size() <= kzg_pk.max_degree() + 1);
         let pks_x_comm = S::commit(kzg_pk, &self.pks_polys[0]).expect("Commitment to pks_x_poly failed");
         let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
-            domain_size: self.domain.size() as u64,
+            domain_size: self.domain().size() as u64,
             _m: PhantomData::default(),
         }
     }

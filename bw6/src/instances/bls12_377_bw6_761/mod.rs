@@ -38,6 +38,9 @@ pub mod kzg;
 /// - Elements being committed to in the keyset
 pub type InnerCurve = Bls12_377_G1;
 
+/// The pairing the inner curve belongs to. Needed to sign with these keys; see [`crate::bls`].
+pub type InnerPairing = ark_bls12_377::Bls12_377;
+
 /// Outer curve: BW6-761 G1 (projective)
 /// 
 /// Used for:
@@ -68,9 +71,16 @@ pub type OuterScalar = Fr;
 /// 
 /// This type is independent of the polynomial commitment scheme used.
 /// Evaluation domain for BW6-761's scalar field: two-adicity 46, so radix-2 applies.
+/// The evaluation domains for BW6-761's scalar field.
+///
+/// Two-adicity is 46 there, so power-of-two domains exist for any size the prover could afford
+/// and the classical `n, 2n, 4n` layout applies.
+pub type Domains761 = crate::Radix2DomainSet<OuterScalar>;
+
+/// A single radix-2 domain. Prefer [`Domains761`]: the protocol works over the triple.
 pub type Domain761 = crate::Radix2Domain<OuterScalar>;
 
-pub type KeysetBls12_377Bw6_671 = Keyset<InnerCurve, OuterCurve, Domain761>;
+pub type KeysetBls12_377Bw6_671 = Keyset<InnerCurve, OuterCurve, Domains761>;
 
 /// Accountable public input for simple and packed proof schemes
 /// 

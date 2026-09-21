@@ -1,73 +1,97 @@
-use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::FftField;
+//! Shared test bodies, written once against [`ApkConfig`] and run on both configurations.
+//!
+//! This module is the working demonstration that the two curves share a protocol: apart from the
+//! proof sizes (BW6-767 group elements are one byte longer) and the absence of `packed` on
+//! APK-381, every function below is called twice with nothing but the config type changed.
+
+use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};
+use ark_ff::{FftField, One, Zero};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::{One, test_rng, Zero};
-use ark_std::{end_timer, start_timer};
 use ark_std::rand::Rng;
-use w3f_pcs::pcs::{PCS, PcsParams};
+use ark_std::{end_timer, start_timer, test_rng};
 use merlin::Transcript;
-use crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761 as Pcs;
-use crate::{DomainFactory, FftDomain};
-use crate::{Bitmask, CommitmentExt, Keyset, CountingProof, PackedProof, SimpleProof, Prover, PublicInput, setup, Verifier};
+use w3f_pcs::pcs::{PcsParams, PCS};
+
+use crate::config::{
+    AccountablePublicInputOf, Apk, ApkConfig, Bls12_377Config, Bls12_381Config, CountingProofOf,
+    CountingPublicInputOf, KeysetCommitmentOf, KeysetOf, PackedProofOf, PcsParamsOf, ProverOf,
+    ScalarOf, SimpleProofOf, VerifierOf,
+};
+use crate::domain::{DomainSet, FftDomain};
+use crate::{Bitmask, CommitmentExt, PublicInput};
 
 pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<bool> {
     (0..n).map(|_| rng.gen_bool(density)).collect()
 }
 
 pub(crate) fn _random_bitmask<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C::ScalarField> {
-    _random_bits(n, 2.0 / 3.0, rng).into_iter()
+    _random_bits(n, 2.0 / 3.0, rng)
+        .into_iter()
         .map(|b| if b { C::ScalarField::one() } else { C::ScalarField::zero() })
         .collect()
 }
 
-pub(crate) fn random_pks<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C> {
-    (0..n)
-        .map(|_| C::rand(rng))
-        .collect()
+pub fn random_pks<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C> {
+    (0..n).map(|_| C::rand(rng)).collect()
 }
 
-fn _test_prove_verify<IC, OC, S, D, ProofT, PI, P, V>(
-    pcs_params: S::Params,
+// The `where` clause on each generic body below is the same four lines every time: the config,
+// the two arithmetic facts the protocol relies on (the outer scalar field is the inner base
+// field, and it supports FFTs), and cloneable PCS parameters. It is repeated rather than aliased
+// because trait aliases are not stable.
+
+fn keyset_and_commitment<C>(
+    params: &PcsParamsOf<C>,
+    keyset_size: usize,
+) -> (KeysetOf<C>, KeysetCommitmentOf<C>)
+where
+    C: ApkConfig,
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
+{
+    let rng = &mut test_rng();
+    let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
+    let t = start_timer!(|| "signer set commitment");
+    let out = Apk::<C>::commit_keyset(params, pks);
+    end_timer!(t);
+    out
+}
+
+/// Proves and verifies one proof of whatever scheme `prove`/`verify` name, and checks that it
+/// survives a serialisation round trip at exactly `proof_size` bytes.
+fn _test_prove_verify<C, ProofT, PI, P, V>(
+    params: PcsParamsOf<C>,
     prove: P,
     verify: V,
     keyset_size: usize,
-    proof_size: usize
-)
-where
-    IC: CurveGroup,
-    OC: CurveGroup,
-    OC::ScalarField: From<IC::BaseField> + FftField,
-    S: PCS<OC::ScalarField>,
-    D: crate::DomainFactory<OC::ScalarField>,
-    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine>,
-    S::Params: Clone,
+    proof_size: usize,
+) where
+    C: ApkConfig,
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
     ProofT: CanonicalSerialize + CanonicalDeserialize,
-    PI: PublicInput<IC>,
-    P: Fn(Prover<IC, OC, S, D>, Bitmask) -> (ProofT, PI),
-    V: Fn(&Verifier<IC, OC, S, D>, &PI, &ProofT) -> bool,
+    PI: PublicInput<C::InnerCurve>,
+    P: Fn(ProverOf<C>, Bitmask) -> (ProofT, PI),
+    V: Fn(&VerifierOf<C>, &PI, &ProofT) -> bool,
 {
     let rng = &mut test_rng();
-
-    let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
-
-    let pks_commitment_ = start_timer!(|| "signer set commitment");
-    let pks_comm = keyset.commit::<S>(&pcs_params.ck());
-    end_timer!(pks_commitment_);
+    let (keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let t_prover_new = start_timer!(|| "prover precomputation");
-    let prover = Prover::new(
+    let prover = ProverOf::<C>::new(
         keyset,
         &pks_comm,
-        pcs_params.clone(),
-        Transcript::new(b"apk_proof")
+        params.clone(),
+        Transcript::new(b"apk_proof"),
     );
     end_timer!(t_prover_new);
 
-    let verifier = Verifier::new(
-        pcs_params.raw_vk(), 
-        pks_comm, 
-        Transcript::new(b"apk_proof")
-    );
+    let verifier =
+        VerifierOf::<C>::new(params.raw_vk(), pks_comm, Transcript::new(b"apk_proof"));
 
     let bits = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect::<Vec<_>>();
     let b = Bitmask::from_bits(&bits);
@@ -89,154 +113,121 @@ where
     assert!(valid);
 }
 
-pub fn test_simple_scheme(keyset_size: usize) {
-    use ark_bls12_377::G1Projective as InnerCurve;
-    use ark_bw6_761::{G1Projective as OuterCurve, Fr};
-    use crate::AccountablePublicInput;
+// ---------------------------------------------------------------------------------------------
+// Proof element sizes
+//
+// Field elements match at 48 bytes across both curves (BW6-767's scalar field is 381 bits,
+// BW6-761's 377). Compressed G1 points do not: BW6-767's base field is 767 bits, which fills 96
+// bytes to within one spare bit, leaving no room for the two flags arkworks needs for the
+// infinity marker and the y-sign, so the encoding spills into a 97th byte. BW6-761's 761-bit
+// base field leaves seven spare bits and stays at 96, which arkworks compresses to 48 per
+// coordinate-free point.
+// ---------------------------------------------------------------------------------------------
 
-    type ProofType = SimpleProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
+/// Bytes per compressed group element and per field element, for a configuration.
+fn proof_size(commitments: usize, field_elements: usize, group_bytes: usize) -> usize {
+    commitments * group_bytes + field_elements * 48
+}
 
-    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
-        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
+const GROUP_BYTES_761: usize = 96; // two 48-byte halves
+const GROUP_BYTES_767: usize = 97;
+
+// ---------------------------------------------------------------------------------------------
+// Positive tests, one body per scheme
+// ---------------------------------------------------------------------------------------------
+
+fn test_simple_scheme_for<C>(keyset_size: usize, group_bytes: usize)
+where
+    C: ApkConfig,
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
+{
+    _test_prove_verify::<C, SimpleProofOf<C>, AccountablePublicInputOf<C>, _, _>(
+        Apk::<C>::setup(keyset_size, &mut test_rng()),
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
         keyset_size,
-        (5 * 2 + 6) * 48 // 5C + 6F
+        proof_size(5, 6, group_bytes),
     );
 }
 
-pub fn test_packed_scheme(keyset_size: usize) {
-    use ark_bls12_377::G1Projective as InnerCurve;
-    use ark_bw6_761::{G1Projective as OuterCurve, Fr};
-    use crate::AccountablePublicInput;
-
-    type ProofType = PackedProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
-
-    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, AccountablePublicInput<InnerCurve>, _, _>(
-        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
-        |prover, bitmask| prover.prove_packed(bitmask),
-        |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
-        keyset_size,
-        (8 * 2 + 9) * 48 // 8C + 9F
-    );
-}
-
-pub fn test_counting_scheme(keyset_size: usize) {
-    use ark_bls12_377::G1Projective as InnerCurve;
-    use ark_bw6_761::{G1Projective as OuterCurve, Fr};
-    use crate::CountingPublicInput;
-
-    type ProofType = CountingProof<Fr, ark_bw6_761::G1Affine, w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_761::BW6_761>, ark_bw6_761::G1Affine>;
-
-    _test_prove_verify::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>, ProofType, CountingPublicInput<InnerCurve>, _, _>(
-        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
+fn test_counting_scheme_for<C>(keyset_size: usize, group_bytes: usize)
+where
+    C: ApkConfig,
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
+{
+    _test_prove_verify::<C, CountingProofOf<C>, CountingPublicInputOf<C>, _, _>(
+        Apk::<C>::setup(keyset_size, &mut test_rng()),
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
         keyset_size,
-        (7 * 2 + 8) * 48 // 7C + 8F
+        proof_size(7, 8, group_bytes),
+    );
+}
+
+pub fn test_simple_scheme(keyset_size: usize) {
+    test_simple_scheme_for::<Bls12_377Config>(keyset_size, GROUP_BYTES_761);
+}
+
+pub fn test_counting_scheme(keyset_size: usize) {
+    test_counting_scheme_for::<Bls12_377Config>(keyset_size, GROUP_BYTES_761);
+}
+
+/// `packed` exists only on APK-377, so it is not written against a generic config: the bound
+/// that would let it be is exactly the one [`Bls12_381Config`] does not satisfy.
+pub fn test_packed_scheme(keyset_size: usize) {
+    type C = Bls12_377Config;
+    _test_prove_verify::<C, PackedProofOf<C>, AccountablePublicInputOf<C>, _, _>(
+        Apk::<C>::setup(keyset_size, &mut test_rng()),
+        |prover, bitmask| prover.prove_packed(bitmask),
+        |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
+        keyset_size,
+        proof_size(8, 9, GROUP_BYTES_761),
     );
 }
 
 // ---------------------------------------------------------------------------------------------
-// APK-381: BLS12-381 / BW6-767
+// APK-381: the same bodies, a different config.
 //
-// The same protocol over a scalar field with two-adicity 1, so every domain is a divisor of
-// 2 * 3^2 * 11 * 23 * 47 and none is a multiple of 4.
-//
-// Proofs are slightly LARGER than APK-377's, by one byte per group element. Field elements
-// match at 48 bytes (BW6-767's scalar field is 381 bits, BW6-761's 377), but a compressed G1
-// point takes 97 bytes here against 96 there: BW6-767's base field is 767 bits, which fills 96
-// bytes to within one spare bit, leaving no room for the two flags arkworks needs for the
-// infinity marker and the y-sign, so the encoding spills into a 97th byte. BW6-761's 761-bit
-// base field leaves seven spare bits and stays at 96.
-//
-// `packed` is absent on purpose — it hardcodes 256-bit bitmask chunks and so needs 256 | n,
+// `packed` is absent on purpose — it hardcodes 256-bit bitmask chunks and so needs `256 | n`,
 // which no BW6-767 domain satisfies.
 // ---------------------------------------------------------------------------------------------
 
 pub fn test_simple_scheme_381(keyset_size: usize) {
-    use crate::instances::bls12_381_bw6_767::{
-        kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve, OuterScalar,
-    };
-    use crate::AccountablePublicInput;
-
-    type ProofType = SimpleProof<
-        OuterScalar,
-        ark_bw6_767::G1Affine,
-        w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_767::BW6_767>,
-        ark_bw6_767::G1Affine,
-    >;
-
-    _test_prove_verify::<
-        InnerCurve,
-        OuterCurve,
-        Pcs381,
-        Domain767,
-        ProofType,
-        AccountablePublicInput<InnerCurve>,
-        _,
-        _,
-    >(
-        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
-            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
-            &mut test_rng(),
-        ),
-        |prover, bitmask| prover.prove_simple(bitmask),
-        |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
-        keyset_size,
-        5 * 97 + 6 * 48, // 5C + 6F
-    );
+    test_simple_scheme_for::<Bls12_381Config>(keyset_size, GROUP_BYTES_767);
 }
 
 pub fn test_counting_scheme_381(keyset_size: usize) {
-    use crate::instances::bls12_381_bw6_767::{
-        kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve, OuterScalar,
-    };
-    use crate::CountingPublicInput;
-
-    type ProofType = CountingProof<
-        OuterScalar,
-        ark_bw6_767::G1Affine,
-        w3f_pcs::pcs::kzg::commitment::KzgCommitment<ark_bw6_767::BW6_767>,
-        ark_bw6_767::G1Affine,
-    >;
-
-    _test_prove_verify::<
-        InnerCurve,
-        OuterCurve,
-        Pcs381,
-        Domain767,
-        ProofType,
-        CountingPublicInput<InnerCurve>,
-        _,
-        _,
-    >(
-        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
-            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
-            &mut test_rng(),
-        ),
-        |prover, bitmask| prover.prove_counting(bitmask),
-        |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
-        keyset_size,
-        7 * 97 + 8 * 48, // 7C + 8F
-    );
+    test_counting_scheme_for::<Bls12_381Config>(keyset_size, GROUP_BYTES_767);
 }
+
 /// `prove_packed` must not exist on APK-381. This function is never called; it is here so the
 /// gate is visible, and so that deleting `SupportsPackedScheme` would be caught by the doc test
 /// below rather than silently re-enabling a scheme that cannot work.
 ///
 /// ```compile_fail
-/// use apk_proofs::instances::bls12_381_bw6_767::kzg::Prover381;
-/// fn f(p: &Prover381, b: apk_proofs::Bitmask) {
-///     let _ = p.prove_packed(b);
+/// use apk_proofs::{Apk381, Bitmask};
+/// fn f(params: &apk_proofs::config::PcsParamsOf<apk_proofs::Bls12_381Config>,
+///      keyset: apk_proofs::config::KeysetOf<apk_proofs::Bls12_381Config>,
+///      comm: &apk_proofs::config::KeysetCommitmentOf<apk_proofs::Bls12_381Config>,
+///      b: Bitmask) {
+///     let _ = Apk381::prove_packed(params, keyset, comm, b);
 /// }
 /// ```
 ///
 /// The same call compiles for APK-377:
 /// ```
-/// use apk_proofs::instances::bls12_377_bw6_761::kzg::ProverBls12_377Bw6_761Kzg as P377;
-/// fn f(p: &P377, b: apk_proofs::Bitmask) {
-///     let _ = p.prove_packed(b);
+/// use apk_proofs::{Apk377, Bitmask};
+/// fn f(params: &apk_proofs::config::PcsParamsOf<apk_proofs::Bls12_377Config>,
+///      keyset: apk_proofs::config::KeysetOf<apk_proofs::Bls12_377Config>,
+///      comm: &apk_proofs::config::KeysetCommitmentOf<apk_proofs::Bls12_377Config>,
+///      b: Bitmask) {
+///     let _ = Apk377::prove_packed(params, keyset, comm, b);
 /// }
 /// ```
 pub fn _packed_scheme_is_gated_to_apk_377() {}
@@ -251,40 +242,25 @@ pub fn _packed_scheme_is_gated_to_apk_377() {}
 
 /// Builds an honest prover/verifier pair, then asserts that verification fails once the claim
 /// no longer matches the proof.
-fn _test_rejects_tampering<IC, OC, S, D>(
-    pcs_params: S::Params,
-    keyset_size: usize,
-) where
-    IC: CurveGroup,
-    OC: CurveGroup,
-    OC::ScalarField: From<IC::BaseField> + FftField,
-    S: PCS<OC::ScalarField>,
-    D: crate::DomainFactory<OC::ScalarField>,
-    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
-    S::Params: Clone,
+fn _test_rejects_tampering<C>(keyset_size: usize)
+where
+    C: ApkConfig,
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
 {
     let rng = &mut test_rng();
-
-    let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
-    let pks_comm = keyset.commit::<S>(&pcs_params.ck());
-    let prover = Prover::<IC, OC, S, D>::new(
-        keyset,
-        &pks_comm,
-        pcs_params.clone(),
-        Transcript::new(b"apk_proof"),
-    );
-    let verifier = Verifier::<IC, OC, S, D>::new(
-        pcs_params.raw_vk(),
-        pks_comm.clone(),
-        Transcript::new(b"apk_proof"),
-    );
+    let params = Apk::<C>::setup(keyset_size, rng);
+    let (keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let bits: Vec<bool> = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect();
-    let (proof, public_input) = prover.prove_simple(Bitmask::from_bits(&bits));
+    let (proof, public_input) =
+        Apk::<C>::prove(&params, keyset, &pks_comm, Bitmask::from_bits(&bits));
 
     // Sanity: the honest claim verifies, so any failure below is caused by the tampering.
     assert!(
-        verifier.verify_simple(&public_input, &proof),
+        Apk::<C>::verify(&params, pks_comm.clone(), &public_input, &proof).unwrap(),
         "the honest proof must verify"
     );
 
@@ -292,59 +268,65 @@ fn _test_rejects_tampering<IC, OC, S, D>(
     // moves every challenge, and it also breaks the aggregate-key relation.
     let mut flipped = bits.clone();
     flipped[0] = !flipped[0];
-    let tampered = crate::AccountablePublicInput::<IC>::new(&public_input.apk, &Bitmask::from_bits(&flipped));
+    let tampered = AccountablePublicInputOf::<C>::new(
+        &public_input.apk,
+        &Bitmask::from_bits(&flipped),
+    );
     assert!(
-        !verifier.verify_simple(&tampered, &proof),
+        !Apk::<C>::verify(&params, pks_comm.clone(), &tampered, &proof).unwrap(),
         "a proof must not verify against a different bitmask"
     );
 
     // Claiming a different aggregate key for the same bitmask.
-    let wrong_apk = crate::AccountablePublicInput::<IC>::new(
-        &(public_input.apk.into_group() + IC::generator()).into_affine(),
+    let wrong_apk = AccountablePublicInputOf::<C>::new(
+        &(public_input.apk.into_group() + C::InnerCurve::generator()).into_affine(),
         &Bitmask::from_bits(&bits),
     );
     assert!(
-        !verifier.verify_simple(&wrong_apk, &proof),
+        !Apk::<C>::verify(&params, pks_comm.clone(), &wrong_apk, &proof).unwrap(),
         "a proof must not verify against a different aggregate key"
     );
 
     // A verifier that disagrees with the prover about the domain must reject. This is what the
     // domain size and generator in the transcript are for: without them the two sides could
-    // silently be working over different domains.
+    // silently be working over different domains. The doubled size has to be a realisable one,
+    // or `verify` would reject it as unconstructible before ever checking the proof.
     let mut wrong_domain_comm = pks_comm;
-    wrong_domain_comm.domain_size *= 2;
-    let wrong_domain_verifier = Verifier::<IC, OC, S, D>::new(
-        pcs_params.raw_vk(),
-        wrong_domain_comm,
-        Transcript::new(b"apk_proof"),
-    );
+    wrong_domain_comm.domain_size = <C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(
+        2 * (keyset_size + 1),
+    )
+    .expect("a larger domain must exist")
+    .base()
+    .size() as u64;
     assert!(
-        !wrong_domain_verifier.verify_simple(&public_input, &proof),
+        !Apk::<C>::verify(&params, wrong_domain_comm, &public_input, &proof).unwrap(),
         "a proof must not verify against a verifier using a different domain"
     );
 }
 
 /// A keyset commitment arrives from the chain, so its domain size is untrusted. Neither a size
 /// the field cannot realise exactly, nor one no field could realise, may panic the verifier.
-fn _test_rejects_bad_domain_size<IC, OC, S, D>(pcs_params: S::Params, keyset_size: usize, unrealisable: u64)
+fn _test_rejects_bad_domain_size<C>(keyset_size: usize, unrealisable: u64)
 where
-    IC: CurveGroup,
-    OC: CurveGroup,
-    OC::ScalarField: From<IC::BaseField> + FftField,
-    S: PCS<OC::ScalarField>,
-    D: crate::DomainFactory<OC::ScalarField>,
-    S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
-    S::Params: Clone,
+    C: ApkConfig,
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
 {
     let rng = &mut test_rng();
-    let keyset = Keyset::<IC, OC, D>::new(random_pks(keyset_size, rng));
-    let pks_comm = keyset.commit::<S>(&pcs_params.ck());
+    let params = Apk::<C>::setup(keyset_size, rng);
+    let (_keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let mut not_exact = pks_comm.clone();
     not_exact.domain_size = unrealisable;
     assert!(
         matches!(
-            Verifier::<IC, OC, S, D>::try_new(pcs_params.raw_vk(), not_exact, Transcript::new(b"apk_proof")),
+            VerifierOf::<C>::try_new(
+                params.raw_vk(),
+                not_exact,
+                Transcript::new(b"apk_proof")
+            ),
             Err(crate::DomainError::NotExact { .. })
         ),
         "a domain size the field cannot realise exactly must be rejected"
@@ -354,132 +336,53 @@ where
     too_large.domain_size = u64::MAX;
     assert!(
         matches!(
-            Verifier::<IC, OC, S, D>::try_new(pcs_params.raw_vk(), too_large, Transcript::new(b"apk_proof")),
+            VerifierOf::<C>::try_new(
+                params.raw_vk(),
+                too_large,
+                Transcript::new(b"apk_proof")
+            ),
             Err(crate::DomainError::TooLarge { .. })
         ),
         "an unrealisable domain size must be rejected"
     );
 }
 
-pub fn test_rejects_bad_domain_size_377(keyset_size: usize) {
-    use ark_bls12_377::G1Projective as InnerCurve;
-    use ark_bw6_761::{Fr, G1Projective as OuterCurve};
-
-    // 255 is not a power of two.
-    _test_rejects_bad_domain_size::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>>(
-        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(keyset_size, &mut test_rng()),
-        keyset_size,
-        255,
-    );
-}
-
-pub fn test_rejects_bad_domain_size_381(keyset_size: usize) {
-    use crate::instances::bls12_381_bw6_767::{kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve};
-
-    // 254 = 2 * 127 does not divide q - 1.
-    _test_rejects_bad_domain_size::<InnerCurve, OuterCurve, Pcs381, Domain767>(
-        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
-            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
-            &mut test_rng(),
-        ),
-        keyset_size,
-        254,
-    );
-}
-
 pub fn test_rejects_tampering_377(keyset_size: usize) {
-    use ark_bls12_377::G1Projective as InnerCurve;
-    use ark_bw6_761::{Fr, G1Projective as OuterCurve};
-
-    _test_rejects_tampering::<InnerCurve, OuterCurve, Pcs, crate::Radix2Domain<Fr>>(
-        setup::generate_for_keyset::<_, Fr, Pcs, crate::Radix2Domain<Fr>>(
-            keyset_size,
-            &mut test_rng(),
-        ),
-        keyset_size,
-    );
+    _test_rejects_tampering::<Bls12_377Config>(keyset_size);
 }
 
 pub fn test_rejects_tampering_381(keyset_size: usize) {
-    use crate::instances::bls12_381_bw6_767::{kzg::Pcs as Pcs381, Domain767, InnerCurve, OuterCurve};
-
-    _test_rejects_tampering::<InnerCurve, OuterCurve, Pcs381, Domain767>(
-        crate::instances::bls12_381_bw6_767::kzg::generate_urs(
-            3 * Domain767::create_domain(keyset_size + 1).size() - 3,
-            &mut test_rng(),
-        ),
-        keyset_size,
-    );
+    _test_rejects_tampering::<Bls12_381Config>(keyset_size);
 }
 
-// ---------------------------------------------------------------------------------------------
-// Config-driven API
-//
-// The point of ApkConfig: one body below serves both curve configurations. Nothing in it names a
-// curve, a field, a commitment scheme or an FFT strategy — those all follow from the single type
-// parameter, and the caller selects a configuration by naming one type.
-// ---------------------------------------------------------------------------------------------
-
-/// Proves and verifies over whichever configuration `C` names.
-pub fn config_driven_roundtrip<C>(
-    pcs_params: <C::Pcs as PCS<crate::ScalarOf<C>>>::Params,
-    keyset_size: usize,
-) -> bool
-where
-    C: crate::ApkConfig,
-    crate::ScalarOf<C>:
-        From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
-    <C::Pcs as PCS<crate::ScalarOf<C>>>::C: CommitmentExt<
-            crate::ScalarOf<C>,
-            Affine = <C::OuterCurve as CurveGroup>::Affine,
-        > + Clone,
-    <C::Pcs as PCS<crate::ScalarOf<C>>>::Params: Clone,
-{
-    let rng = &mut test_rng();
-
-    let keyset = crate::KeysetOf::<C>::new(random_pks(keyset_size, rng));
-    let pks_comm = keyset.commit::<C::Pcs>(&pcs_params.ck());
-
-    let prover = crate::ProverOf::<C>::new(
-        keyset,
-        &pks_comm,
-        pcs_params.clone(),
-        Transcript::new(b"apk_proof"),
-    );
-    let verifier = crate::VerifierOf::<C>::new(
-        pcs_params.raw_vk(),
-        pks_comm,
-        Transcript::new(b"apk_proof"),
-    );
-
-    let bits: Vec<bool> = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect();
-    let (proof, public_input) = prover.prove_simple(Bitmask::from_bits(&bits));
-    verifier.verify_simple(&public_input, &proof)
+pub fn test_rejects_bad_domain_size_377(keyset_size: usize) {
+    // Not a power of two, so no radix-2 domain has exactly this size.
+    _test_rejects_bad_domain_size::<Bls12_377Config>(keyset_size, 300);
 }
 
-/// Runs the same body over both configurations.
+pub fn test_rejects_bad_domain_size_381(keyset_size: usize) {
+    // 254 is not a divisor of 3 * 11 * 23 * 47 * 10177, so it is not a table entry.
+    _test_rejects_bad_domain_size::<Bls12_381Config>(keyset_size, 254);
+}
+
+/// One function body, both curves — the same four calls, with only the config type changed.
 pub fn test_config_driven_api() {
-    use crate::{Bls12_377Config, Bls12_381Config};
+    fn roundtrip<C: ApkConfig>(keyset_size: usize) -> bool
+    where
+        ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + FftField,
+        <C::Pcs as PCS<ScalarOf<C>>>::C:
+            CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+        PcsParamsOf<C>: Clone,
+    {
+        let rng = &mut test_rng();
+        let params = Apk::<C>::setup(keyset_size, rng);
+        let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
+        let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);
+        let (proof, public_input) = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
+        Apk::<C>::verify(&params, commitment, &public_input, &proof).unwrap()
+    }
 
-    assert!(
-        config_driven_roundtrip::<Bls12_377Config>(
-            crate::config::setup_for_keyset::<Bls12_377Config, _>(255, &mut test_rng()),
-            255,
-        ),
-        "APK-377 roundtrip through the config API"
-    );
-
-    // APK-381 cannot use the generic setup helper: w3f-pcs refuses to build an SRS for a curve
-    // with this two-adicity. See instances::bls12_381_bw6_767::kzg::generate_urs.
-    use crate::instances::bls12_381_bw6_767::Domain767;
-    assert!(
-        config_driven_roundtrip::<Bls12_381Config>(
-            crate::instances::bls12_381_bw6_767::kzg::generate_urs(
-                3 * Domain767::create_domain(253).size() - 3,
-                &mut test_rng(),
-            ),
-            252,
-        ),
-        "APK-381 roundtrip through the same body"
-    );
+    assert!(roundtrip::<Bls12_377Config>(255));
+    assert!(roundtrip::<Bls12_381Config>(252));
 }

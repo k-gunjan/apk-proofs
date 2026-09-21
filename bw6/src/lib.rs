@@ -29,12 +29,13 @@ pub mod bls;
 pub mod config;
 pub mod domain;
 pub use config::{
-    AccountablePublicInputOf, Apk, ApkConfig, Bls12_377Config, Bls12_381Config, KeysetCommitmentOf, KeysetOf, ProverOf, ScalarOf,
-    VerifierOf,
+    AccountablePublicInputOf, Apk, Apk377, Apk381, ApkConfig, Bls12_377Config, Bls12_381Config,
+    CountingProofOf, CountingPublicInputOf, KeysetCommitmentOf, KeysetOf, PackedProofOf,
+    PcsParamsOf, ProverOf, ScalarOf, SimpleProofOf, VerifierOf,
 };
 pub use domain::{
-    CooleyTukeyDomain, DomainError, DomainFactory, FftDomain, NaiveDomain, Radix2Domain,
-    SupportsPackedScheme,
+    CooleyTukeyDomain, DomainError, DomainFactory, DomainSet, FftDomain, NaiveDomain,
+    Radix2Domain, Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme, APK381_DOMAIN_SIZES,
 };
 
 mod transcript;

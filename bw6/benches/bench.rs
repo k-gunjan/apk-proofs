@@ -14,7 +14,7 @@ use w3f_pcs::pcs::PcsParams;
 use apk_proofs::{Keyset, setup, CommitmentExt, FftDomain};
 
 /// BW6-761's scalar field is 2-adic, so the benches use the radix-2 domain.
-type BenchDomain = apk_proofs::Radix2Domain<Fr>;
+type BenchDomain = apk_proofs::Radix2DomainSet<Fr>;
 
 fn barycentric_evaluation<F: Field>(c: &mut Criterion, n: u32) {
     use ark_poly::{Evaluations, EvaluationDomain, Radix2EvaluationDomain, Polynomial};
@@ -112,7 +112,7 @@ fn amplification(c: &mut Criterion) {
             &log_domain_size,
             |b, _| b.iter(|| {
                 let poly = domains.interpolate(evals.clone());
-                domains.domain2x.fft(&poly.coeffs)
+                domains.domain2x().fft(&poly.coeffs)
             }),
         );
 
@@ -129,7 +129,7 @@ fn amplification(c: &mut Criterion) {
             &log_domain_size,
             |b, _| b.iter(|| {
                 let poly = domains.interpolate(evals.clone());
-                domains.domain4x.fft(&poly.coeffs)
+                domains.domain4x().fft(&poly.coeffs)
             }),
         );
 

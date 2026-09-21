@@ -83,10 +83,10 @@ pub fn generate_urs<R: ark_std::rand::RngCore>(
 pub type KeysetCommitment381 = KeysetCommitment<OuterScalar, Commitment>;
 
 /// Prover for BLS12-377 + BW6-761 with KZG commitments
-pub type Prover381 = Prover<InnerCurve, OuterCurve, Pcs, super::Domain767>;
+pub type Prover381 = Prover<InnerCurve, OuterCurve, Pcs, super::Domains767>;
 
 /// Verifier for BLS12-377 + BW6-761 with KZG commitments
-pub type Verifier381 = Verifier<InnerCurve, OuterCurve, Pcs, super::Domain767>;
+pub type Verifier381 = Verifier<InnerCurve, OuterCurve, Pcs, super::Domains767>;
 
 // ============================================================================
 // Proof Type Aliases

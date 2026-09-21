@@ -43,7 +43,10 @@ name = "bench"
 harness = false
 
 [[example]]
-name = "recursive"
+name = "apk_377"
+
+[[example]]
+name = "apk_381"
 
 [[test]]
 name = "basic"

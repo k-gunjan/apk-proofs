@@ -4,7 +4,7 @@ use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::{utils, Bitmask, Keyset, PublicInput};
 use crate::domains::Domains;
 
@@ -102,7 +102,7 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     type P1: RegisterPolynomials<OC::Affine>;
     type P2: RegisterPolynomials<OC::Affine>;
@@ -126,7 +126,7 @@ where
     fn compute_constraint_polynomials(&self) -> Vec<DensePolynomial<OC::ScalarField>>;
 
     //TODO: remove domains param
-    fn compute_quotient_polynomial(&self, phi: OC::ScalarField, domain: &D) -> DensePolynomial<OC::ScalarField> {
+    fn compute_quotient_polynomial(&self, phi: OC::ScalarField, domain: &D::Domain) -> DensePolynomial<OC::ScalarField> {
         let w = utils::randomize(phi, &self.compute_constraint_polynomials());
         let (q_poly, r) = domain.divide_by_vanishing_poly(&w);
         assert_eq!(r, DensePolynomial::zero());

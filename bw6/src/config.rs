@@ -1,31 +1,52 @@
-//! Curve configurations.
+//! Curve configurations, and the API the crate is meant to be used through.
 //!
 //! An APK proof is parameterised by four things that are not independent: an inner BLS12 curve
 //! carrying the signatures, an outer BW6 curve the proof is computed over, a polynomial
-//! commitment scheme on the outer curve, and an FFT strategy for the outer curve's scalar field.
-//! Only a handful of combinations are coherent — the outer curve's scalar field has to be the
-//! inner curve's base field, and the FFT strategy has to match that field's structure.
+//! commitment scheme on the outer curve, and a set of evaluation domains for the outer curve's
+//! scalar field. Only a handful of combinations are coherent — the outer curve's scalar field
+//! has to be the inner curve's base field, and the domains have to match that field's structure.
 //!
 //! [`ApkConfig`] bundles them, so choosing a curve is naming one type rather than four, and
-//! combinations that do not make sense cannot be spelled.
+//! combinations that do not make sense cannot be spelled. Everything below the config —
+//! [`crate::Keyset`], [`crate::Prover`], [`crate::Verifier`], the PIOP — carries a single type
+//! parameter, and [`Apk`] hides even that:
+//!
+//! ```no_run
+//! use apk_proofs::{Apk381, Bitmask};
+//! # let pks: Vec<ark_bls12_381::G1Projective> = unimplemented!();
+//! # let bitmask: Bitmask = unimplemented!();
+//! let rng = &mut ark_std::test_rng();
+//! let setup = Apk381::setup(1000, rng);                      // validators, not log2(anything)
+//! let (keyset, commitment) = Apk381::commit_keyset(&setup, pks);
+//! let (proof, public_input) = Apk381::prove(&setup, keyset, &commitment, bitmask);
+//! assert!(Apk381::verify(&setup, commitment, &public_input, &proof).unwrap());
+//! ```
 
+use ark_ec::pairing::Pairing;
 use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
 use w3f_pcs::pcs::PCS;
 
-use crate::domain::DomainFactory;
+use crate::domain::DomainSet;
 
 /// The scalar field of a configuration's outer curve, which is also the base field of its inner
 /// curve. All polynomial arithmetic happens here.
 pub type ScalarOf<C> = <<C as ApkConfig>::OuterCurve as ark_ec::PrimeGroup>::ScalarField;
 
-/// A coherent choice of curves, commitment scheme and FFT strategy.
+/// A coherent choice of curves, commitment scheme and evaluation domains.
 pub trait ApkConfig: 'static + Sized {
     /// Distinguishes configurations in the Fiat-Shamir transcript.
     const NAME: &'static str;
 
     /// Where the BLS public keys live.
     type InnerCurve: CurveGroup;
+
+    /// The pairing `InnerCurve` belongs to.
+    ///
+    /// The proof system itself only ever touches G1, but a caller signing with these keys needs
+    /// G2 and the pairing — so naming it here keeps [`crate::bls`] reachable from a config
+    /// rather than forcing callers back to a concrete curve. See `examples/`.
+    type InnerPairing: Pairing<G1 = Self::InnerCurve>;
 
     /// Where the proof is computed. Its scalar field is `InnerCurve`'s base field, which is what
     /// lets inner-curve coordinates be manipulated as native field elements.
@@ -34,9 +55,19 @@ pub trait ApkConfig: 'static + Sized {
     /// Commitment scheme over the outer curve.
     type Pcs: PCS<ScalarOf<Self>>;
 
-    /// Evaluation domains for the outer curve's scalar field. This is the component that cannot
-    /// be shared between configurations: see [`crate::domain`].
-    type Domain: DomainFactory<ScalarOf<Self>>;
+    /// The `n, 2n, kn` triple of evaluation domains, and the shift that goes with them. This is
+    /// the component that cannot be shared between configurations: see [`crate::domain`].
+    type Domains: DomainSet<ScalarOf<Self>>;
+
+    /// Produces commitment-scheme parameters supporting polynomials up to `max_degree`.
+    ///
+    /// A hook rather than a straight call to `Pcs::setup` because w3f-pcs's KZG setup asserts
+    /// `n <= 2^TWO_ADICITY`, which BW6-767 cannot satisfy. See
+    /// [`crate::instances::bls12_381_bw6_767::kzg::generate_urs`].
+    fn generate_pcs_params<R: rand::Rng>(
+        max_degree: usize,
+        rng: &mut R,
+    ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params;
 }
 
 /// The prover for a configuration.
@@ -44,7 +75,7 @@ pub type ProverOf<C> = crate::Prover<
     <C as ApkConfig>::InnerCurve,
     <C as ApkConfig>::OuterCurve,
     <C as ApkConfig>::Pcs,
-    <C as ApkConfig>::Domain,
+    <C as ApkConfig>::Domains,
 >;
 
 /// The verifier for a configuration.
@@ -52,127 +83,19 @@ pub type VerifierOf<C> = crate::Verifier<
     <C as ApkConfig>::InnerCurve,
     <C as ApkConfig>::OuterCurve,
     <C as ApkConfig>::Pcs,
-    <C as ApkConfig>::Domain,
+    <C as ApkConfig>::Domains,
 >;
 
 /// The keyset type for a configuration.
 pub type KeysetOf<C> = crate::Keyset<
     <C as ApkConfig>::InnerCurve,
     <C as ApkConfig>::OuterCurve,
-    <C as ApkConfig>::Domain,
+    <C as ApkConfig>::Domains,
 >;
 
 /// The keyset commitment type for a configuration.
 pub type KeysetCommitmentOf<C> =
     crate::KeysetCommitment<ScalarOf<C>, <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C>;
-
-/// Generates commitment-scheme parameters big enough for `keyset_size` public keys.
-///
-/// The domain, not the caller, decides the realised size; see [`crate::setup`].
-pub fn setup_for_keyset<C, R>(keyset_size: usize, rng: &mut R) -> <C::Pcs as PCS<ScalarOf<C>>>::Params
-where
-    C: ApkConfig,
-    R: rand::Rng,
-    ScalarOf<C>: PrimeField,
-{
-    crate::setup::generate_for_keyset::<R, ScalarOf<C>, C::Pcs, C::Domain>(keyset_size, rng)
-}
-
-/// BLS12-377 signatures, proofs over BW6-761, KZG commitments, radix-2 domains.
-///
-/// BW6-761's scalar field has two-adicity 46, so power-of-two domains exist for every size the
-/// prover could want and arkworks' radix-2 machinery applies unchanged.
-pub struct Bls12_377Config;
-
-impl ApkConfig for Bls12_377Config {
-    const NAME: &'static str = "apk-bls12-377-bw6-761";
-    type InnerCurve = crate::instances::bls12_377_bw6_761::InnerCurve;
-    type OuterCurve = crate::instances::bls12_377_bw6_761::OuterCurve;
-    type Pcs = crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761;
-    type Domain = crate::instances::bls12_377_bw6_761::Domain761;
-}
-
-/// BLS12-381 signatures, proofs over BW6-767, KZG commitments, mixed-radix domains.
-///
-/// BW6-767's scalar field has two-adicity **1**. No power-of-two domain beyond size 2 exists
-/// there and no domain size is divisible by 4, so sizes are divisors of
-/// `2 * 3^2 * 11 * 23 * 47 * 10177` and are transformed by Cooley-Tukey with Rader for the
-/// large factor.
-///
-/// The `packed` scheme is unavailable here — it needs `256 | n`. Asking for it is a compile
-/// error; see [`crate::SupportsPackedScheme`].
-pub struct Bls12_381Config;
-
-impl ApkConfig for Bls12_381Config {
-    const NAME: &'static str = "apk-bls12-381-bw6-767";
-    type InnerCurve = crate::instances::bls12_381_bw6_767::InnerCurve;
-    type OuterCurve = crate::instances::bls12_381_bw6_767::OuterCurve;
-    type Pcs = crate::instances::bls12_381_bw6_767::kzg::Pcs;
-    type Domain = crate::instances::bls12_381_bw6_767::Domain767;
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::FftDomain;
-    use ark_std::{test_rng, UniformRand};
-
-    /// The API the crate is meant to be used through: name a curve, get a proof.
-    /// The same four lines run on either configuration.
-    #[test]
-    fn apk_facade_roundtrips_on_both_configurations() {
-        fn roundtrip<C: ApkConfig>(params: PcsParamsOf<C>, n: usize) -> bool
-        where
-            ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
-            <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<
-                    ScalarOf<C>,
-                    Affine = <C::OuterCurve as CurveGroup>::Affine,
-                > + Clone,
-            PcsParamsOf<C>: Clone,
-        {
-            let rng = &mut test_rng();
-            let pks: Vec<C::InnerCurve> = (0..n).map(|_| C::InnerCurve::rand(rng)).collect();
-
-            let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
-            let bitmask = crate::Bitmask::from_bits(&vec![true; n]);
-            let (proof, public_input) = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
-            Apk::<C>::verify(&params, commitment, &public_input, &proof).unwrap()
-        }
-
-        assert!(roundtrip::<Bls12_377Config>(
-            setup_for_keyset::<Bls12_377Config, _>(255, &mut test_rng()),
-            255
-        ));
-
-        use crate::instances::bls12_381_bw6_767::Domain767;
-        assert!(roundtrip::<Bls12_381Config>(
-            crate::instances::bls12_381_bw6_767::kzg::generate_urs(
-                3 * Domain767::create_domain(253).size() - 3,
-                &mut test_rng(),
-            ),
-            252
-        ));
-    }
-
-    /// Selecting a curve is naming one type, and the FFT strategy follows from it rather than
-    /// being chosen by the caller.
-    #[test]
-    fn a_config_determines_its_domain_strategy() {
-        // Radix-2: powers of two.
-        let d377 = <Bls12_377Config as ApkConfig>::Domain::create_domain(200);
-        assert_eq!(d377.size(), 256);
-
-        // Mixed-radix: divisors of the smooth part of q - 1, and 256 is not one of them.
-        let d381 = <Bls12_381Config as ApkConfig>::Domain::create_domain(200);
-        assert_eq!(d381.size(), 207); // 3^2 * 23
-        assert_ne!(d381.size() % 4, 0, "no BW6-767 domain is a multiple of 4");
-    }
-
-    #[test]
-    fn configs_are_named_distinctly() {
-        assert_ne!(Bls12_377Config::NAME, Bls12_381Config::NAME);
-    }
-}
 
 /// Convenience aliases for a configuration's proof and public-input types.
 pub type SimpleProofOf<C> = crate::SimpleProof<
@@ -181,16 +104,102 @@ pub type SimpleProofOf<C> = crate::SimpleProof<
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Proof,
 >;
-pub type AccountablePublicInputOf<C> =
-    crate::AccountablePublicInput<<C as ApkConfig>::InnerCurve>;
+pub type PackedProofOf<C> = crate::PackedProof<
+    ScalarOf<C>,
+    <<C as ApkConfig>::OuterCurve as CurveGroup>::Affine,
+    <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C,
+    <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Proof,
+>;
+pub type CountingProofOf<C> = crate::CountingProof<
+    ScalarOf<C>,
+    <<C as ApkConfig>::OuterCurve as CurveGroup>::Affine,
+    <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C,
+    <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Proof,
+>;
+pub type AccountablePublicInputOf<C> = crate::AccountablePublicInput<<C as ApkConfig>::InnerCurve>;
+pub type CountingPublicInputOf<C> = crate::CountingPublicInput<<C as ApkConfig>::InnerCurve>;
 pub type PcsParamsOf<C> = <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Params;
+
+/// Generates commitment-scheme parameters big enough for `keyset_size` public keys.
+///
+/// The domain set, not the caller, decides the realised size; see [`crate::setup`].
+pub fn setup_for_keyset<C, R>(keyset_size: usize, rng: &mut R) -> PcsParamsOf<C>
+where
+    C: ApkConfig,
+    R: rand::Rng,
+    ScalarOf<C>: PrimeField,
+{
+    use crate::domain::FftDomain;
+    // The additional slot is occupied by the affine addition accumulator's initial value.
+    let domains = <C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(keyset_size + 1)
+        .expect("no evaluation domain large enough for this keyset");
+    // The prover commits to the quotient q = aggregate_constraint / vanishing. The highest
+    // constraint degree is 4n - 3, so deg(q) = 3n - 3.
+    C::generate_pcs_params(3 * domains.base().size() - 3, rng)
+}
+
+/// BLS12-377 signatures, proofs over BW6-761, KZG commitments, radix-2 domains.
+///
+/// BW6-761's scalar field has two-adicity 46, so power-of-two domains exist for every size the
+/// prover could want and arkworks' radix-2 machinery applies unchanged. The domain triple is
+/// `n, 2n, 4n`.
+pub struct Bls12_377Config;
+
+impl ApkConfig for Bls12_377Config {
+    const NAME: &'static str = "apk-bls12-377-bw6-761";
+    type InnerCurve = crate::instances::bls12_377_bw6_761::InnerCurve;
+    type InnerPairing = crate::instances::bls12_377_bw6_761::InnerPairing;
+    type OuterCurve = crate::instances::bls12_377_bw6_761::OuterCurve;
+    type Pcs = crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761;
+    type Domains = crate::instances::bls12_377_bw6_761::Domains761;
+
+    fn generate_pcs_params<R: rand::Rng>(
+        max_degree: usize,
+        rng: &mut R,
+    ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params {
+        <Self::Pcs as PCS<ScalarOf<Self>>>::setup(max_degree, rng)
+    }
+}
+
+/// BLS12-381 signatures, proofs over BW6-767, KZG commitments, mixed-radix domains.
+///
+/// BW6-767's scalar field has two-adicity **1**. No power-of-two domain beyond size 2 exists
+/// there and no domain size is divisible by 4, so sizes are divisors of
+/// `2 * 3^2 * 11 * 23 * 47 * 10177` and are transformed by Cooley-Tukey, with Rader for the
+/// large factor. The domain triple is `n, 2n, 6n`; see [`crate::APK381_DOMAIN_SIZES`].
+///
+/// The `packed` scheme is unavailable here — it needs `256 | n`. Asking for it is a compile
+/// error; see [`crate::SupportsPackedScheme`].
+pub struct Bls12_381Config;
+
+impl ApkConfig for Bls12_381Config {
+    const NAME: &'static str = "apk-bls12-381-bw6-767";
+    type InnerCurve = crate::instances::bls12_381_bw6_767::InnerCurve;
+    type InnerPairing = crate::instances::bls12_381_bw6_767::InnerPairing;
+    type OuterCurve = crate::instances::bls12_381_bw6_767::OuterCurve;
+    type Pcs = crate::instances::bls12_381_bw6_767::kzg::Pcs;
+    type Domains = crate::instances::bls12_381_bw6_767::Domains767;
+
+    fn generate_pcs_params<R: rand::Rng>(
+        max_degree: usize,
+        rng: &mut R,
+    ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params {
+        crate::instances::bls12_381_bw6_767::kzg::generate_urs(max_degree, rng)
+    }
+}
 
 /// The APK proof system for a configuration.
 ///
 /// The entry point when you want the protocol rather than its parts: `Apk::<Bls12_381Config>`
-/// picks the curves, the commitment scheme and the FFT strategy together. Use
+/// picks the curves, the commitment scheme and the domains together. Use
 /// [`ProverOf`]/[`VerifierOf`] directly when you need to reuse a prover across many proofs.
 pub struct Apk<C: ApkConfig>(core::marker::PhantomData<C>);
+
+/// APK proofs over BLS12-377 / BW6-761.
+pub type Apk377 = Apk<Bls12_377Config>;
+
+/// APK proofs over BLS12-381 / BW6-767.
+pub type Apk381 = Apk<Bls12_381Config>;
 
 impl<C: ApkConfig> Apk<C>
 where
@@ -199,6 +208,24 @@ where
         crate::CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
 {
+    /// Commitment-scheme parameters for a validator set of `keyset_size` keys.
+    ///
+    /// `keyset_size` is the number of validators, not a logarithm and not a domain size: which
+    /// domain that implies is the configuration's business, and on APK-381 it is not a power of
+    /// two. Read it back with [`Apk::domain_size`] if you need to know.
+    pub fn setup<R: rand::Rng>(keyset_size: usize, rng: &mut R) -> PcsParamsOf<C> {
+        setup_for_keyset::<C, R>(keyset_size, rng)
+    }
+
+    /// The trace domain size this configuration will use for `keyset_size` validators.
+    ///
+    /// Always at least `keyset_size + 1` — the extra row holds the affine-addition accumulator's
+    /// initial value — and rounded up to a size the field supports.
+    pub fn domain_size(keyset_size: usize) -> Result<usize, crate::DomainError> {
+        use crate::domain::FftDomain;
+        Ok(<C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(keyset_size + 1)?.base().size())
+    }
+
     /// Interpolates and commits to a signer set.
     ///
     /// The domain size follows from `pks.len()`; the commitment records it so the verifier
@@ -213,6 +240,31 @@ where
         (keyset, commitment)
     }
 
+    fn prover(
+        params: &PcsParamsOf<C>,
+        keyset: KeysetOf<C>,
+        commitment: &KeysetCommitmentOf<C>,
+    ) -> ProverOf<C> {
+        ProverOf::<C>::new(
+            keyset,
+            commitment,
+            params.clone(),
+            merlin::Transcript::new(b"apk_proof"),
+        )
+    }
+
+    fn verifier(
+        params: &PcsParamsOf<C>,
+        commitment: KeysetCommitmentOf<C>,
+    ) -> Result<VerifierOf<C>, crate::DomainError> {
+        use w3f_pcs::pcs::PcsParams;
+        VerifierOf::<C>::try_new(
+            params.raw_vk(),
+            commitment,
+            merlin::Transcript::new(b"apk_proof"),
+        )
+    }
+
     /// Proves that `bitmask` selects the signers whose aggregate key the returned public input
     /// names.
     pub fn prove(
@@ -221,13 +273,7 @@ where
         commitment: &KeysetCommitmentOf<C>,
         bitmask: crate::Bitmask,
     ) -> (SimpleProofOf<C>, AccountablePublicInputOf<C>) {
-        let prover = ProverOf::<C>::new(
-            keyset,
-            commitment,
-            params.clone(),
-            merlin::Transcript::new(b"apk_proof"),
-        );
-        prover.prove_simple(bitmask)
+        Self::prover(params, keyset, commitment).prove_simple(bitmask)
     }
 
     /// Checks a proof against a claimed aggregate key and bitmask.
@@ -240,12 +286,131 @@ where
         public_input: &AccountablePublicInputOf<C>,
         proof: &SimpleProofOf<C>,
     ) -> Result<bool, crate::DomainError> {
-        use w3f_pcs::pcs::PcsParams;
-        let verifier = VerifierOf::<C>::try_new(
-            params.raw_vk(),
-            commitment,
-            merlin::Transcript::new(b"apk_proof"),
-        )?;
-        Ok(verifier.verify_simple(public_input, proof))
+        Ok(Self::verifier(params, commitment)?.verify_simple(public_input, proof))
+    }
+
+    /// Proves only how many validators signed, not which ones.
+    pub fn prove_counting(
+        params: &PcsParamsOf<C>,
+        keyset: KeysetOf<C>,
+        commitment: &KeysetCommitmentOf<C>,
+        bitmask: crate::Bitmask,
+    ) -> (CountingProofOf<C>, CountingPublicInputOf<C>) {
+        Self::prover(params, keyset, commitment).prove_counting(bitmask)
+    }
+
+    /// Checks a counting proof against a claimed aggregate key and signer count.
+    pub fn verify_counting(
+        params: &PcsParamsOf<C>,
+        commitment: KeysetCommitmentOf<C>,
+        public_input: &CountingPublicInputOf<C>,
+        proof: &CountingProofOf<C>,
+    ) -> Result<bool, crate::DomainError> {
+        Ok(Self::verifier(params, commitment)?.verify_counting(public_input, proof))
+    }
+}
+
+/// The `packed` scheme, available only where the domains can supply sizes divisible by 256.
+///
+/// [`Bls12_381Config`] does not satisfy this and cannot be made to: `q - 1` for BW6-767 carries
+/// a single factor of 2, so no domain size there is even a multiple of 4. Calling
+/// `Apk::<Bls12_381Config>::prove_packed` is a compile error rather than a runtime panic.
+impl<C: ApkConfig> Apk<C>
+where
+    ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
+    <C::Pcs as PCS<ScalarOf<C>>>::C:
+        crate::CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+    PcsParamsOf<C>: Clone,
+    C::Domains: crate::SupportsPackedScheme,
+{
+    pub fn prove_packed(
+        params: &PcsParamsOf<C>,
+        keyset: KeysetOf<C>,
+        commitment: &KeysetCommitmentOf<C>,
+        bitmask: crate::Bitmask,
+    ) -> (PackedProofOf<C>, AccountablePublicInputOf<C>) {
+        Self::prover(params, keyset, commitment).prove_packed(bitmask)
+    }
+
+    pub fn verify_packed(
+        params: &PcsParamsOf<C>,
+        commitment: KeysetCommitmentOf<C>,
+        public_input: &AccountablePublicInputOf<C>,
+        proof: &PackedProofOf<C>,
+    ) -> Result<bool, crate::DomainError> {
+        Ok(Self::verifier(params, commitment)?.verify_packed(public_input, proof))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::FftDomain;
+    use ark_std::{test_rng, UniformRand};
+
+    /// The API the crate is meant to be used through: name a curve, get a proof.
+    /// The same five lines run on either configuration.
+    #[test]
+    fn apk_facade_roundtrips_on_both_configurations() {
+        fn roundtrip<C: ApkConfig>(n: usize) -> bool
+        where
+            ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
+            <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<
+                    ScalarOf<C>,
+                    Affine = <C::OuterCurve as CurveGroup>::Affine,
+                > + Clone,
+            PcsParamsOf<C>: Clone,
+        {
+            let rng = &mut test_rng();
+            let params = Apk::<C>::setup(n, rng);
+            let pks: Vec<C::InnerCurve> = (0..n).map(|_| C::InnerCurve::rand(rng)).collect();
+
+            let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
+            let bitmask = crate::Bitmask::from_bits(&vec![true; n]);
+            let (proof, public_input) = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
+            Apk::<C>::verify(&params, commitment, &public_input, &proof).unwrap()
+        }
+
+        assert!(roundtrip::<Bls12_377Config>(255));
+        assert!(roundtrip::<Bls12_381Config>(252));
+    }
+
+    /// `setup` takes a validator count. Nothing in the API asks the caller for a log, or for a
+    /// domain size: which domain a validator count implies is the configuration's business.
+    #[test]
+    fn setup_is_sized_by_validator_count_not_by_domain_size() {
+        // 252 validators need 253 rows, which is 11 * 23 exactly.
+        assert_eq!(Apk381::domain_size(252).unwrap(), 253);
+        // 1000 rounds up to 23 * 47; 1500 to 3 * 11 * 47. Neither is a power of two.
+        assert_eq!(Apk381::domain_size(1000).unwrap(), 1081);
+        assert_eq!(Apk381::domain_size(1500).unwrap(), 1551);
+        // The same call on APK-377 rounds up to a power of two instead.
+        assert_eq!(Apk377::domain_size(1000).unwrap(), 1024);
+        assert_eq!(Apk377::domain_size(1500).unwrap(), 2048);
+    }
+
+    /// Selecting a curve is naming one type, and the domain strategy follows from it rather than
+    /// being chosen by the caller.
+    #[test]
+    fn a_config_determines_its_domain_strategy() {
+        type D377 = <Bls12_377Config as ApkConfig>::Domains;
+        type D381 = <Bls12_381Config as ApkConfig>::Domains;
+
+        // Radix-2: powers of two, expanded 2x and 4x.
+        let d377 = <D377 as DomainSet<_>>::for_min_size(200).unwrap();
+        assert_eq!(d377.base().size(), 256);
+        assert_eq!(d377.large().size(), 4 * 256);
+
+        // Mixed-radix: divisors of 3 * 11 * 23 * 47 * 10177, expanded 2x and 6x. 256 is not one
+        // of them, and no size here is even a multiple of 4.
+        let d381 = <D381 as DomainSet<_>>::for_min_size(200).unwrap();
+        assert_eq!(d381.base().size(), 253); // 11 * 23
+        assert_eq!(d381.large().size(), 6 * 253);
+        assert_ne!(d381.base().size() % 4, 0, "no BW6-767 domain is a multiple of 4");
+    }
+
+    #[test]
+    fn configs_are_named_distinctly() {
+        assert_ne!(Bls12_377Config::NAME, Bls12_381Config::NAME);
     }
 }

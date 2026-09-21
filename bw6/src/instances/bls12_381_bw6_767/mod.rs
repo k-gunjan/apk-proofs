@@ -45,6 +45,9 @@ pub mod kzg;
 /// - Elements being committed to in the keyset
 pub type InnerCurve = Bls12_381_G1;
 
+/// The pairing the inner curve belongs to. Needed to sign with these keys; see [`crate::bls`].
+pub type InnerPairing = ark_bls12_381::Bls12_381;
+
 /// Outer curve: BW6-761 G1 (projective)
 /// 
 /// Used for:
@@ -74,14 +77,20 @@ pub type OuterScalar = Fr;
 /// Keyset for BLS12-381 public keys with BW6-761 operations
 /// 
 /// This type is independent of the polynomial commitment scheme used.
-/// Evaluation domain for BW6-767's scalar field.
+/// Evaluation domains for BW6-767's scalar field.
 ///
 /// Two-adicity is 1 there, so radix-2 does not exist: no power-of-two domain beyond size 2, and
-/// no domain size divisible by 4 at all. Sizes are divisors of 2 * 3^2 * 11 * 23 * 47, and are
-/// transformed by mixed-radix Cooley-Tukey.
+/// no domain size divisible by 4 at all. One factor of 2 and one of 3 are reserved so that the
+/// triple can be `n, 2n, 6n`, which leaves the base sizes as the divisors of
+/// `3 * 11 * 23 * 47 * 10177` — see [`crate::APK381_DOMAIN_SIZES`]. They are transformed by
+/// mixed-radix Cooley-Tukey, with Rader for the factor 10177.
+pub type Domains767 = crate::SmoothDomainSet<OuterScalar>;
+
+/// A single mixed-radix domain. Prefer [`Domains767`]: the protocol works over the triple, and
+/// the triple is what makes the sizes `n, 2n, 6n` line up.
 pub type Domain767 = crate::CooleyTukeyDomain<OuterScalar>;
 
-pub type Keyset381 = Keyset<InnerCurve, OuterCurve, Domain767>;
+pub type Keyset381 = Keyset<InnerCurve, OuterCurve, Domains767>;
 
 /// Accountable public input for simple and packed proof schemes
 /// 

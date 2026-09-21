@@ -4,13 +4,13 @@ use ark_poly::polynomial::univariate::DensePolynomial;
 use w3f_pcs::pcs::PCS;
 
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
 use crate::piop::affine_addition::{AffineAdditionRegisters, PartialSumsAndBitmaskPolynomials};
 use crate::piop::bitmask_packing::{BitmaskPackingPolynomials, BitmaskPackingRegisters, SuccinctAccountableRegisterEvaluations};
 use crate::piop::ProverProtocol;
 
-pub struct PackedRegisterBuilder<F: PrimeField, D: DomainFactory<F>> {
+pub struct PackedRegisterBuilder<F: PrimeField, D: DomainSet<F>> {
     bitmask: Bitmask,
     affine_addition_registers: AffineAdditionRegisters<F, D>,
     bitmask_packing_registers: Option<BitmaskPackingRegisters<F, D>>,
@@ -23,7 +23,7 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     type P1 = PartialSumsAndBitmaskPolynomials<OC::ScalarField>;
     type P2 = BitmaskPackingPolynomials<OC::ScalarField>;

@@ -8,7 +8,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
 use crate::{point_in_g1_complement_g, Keyset};
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::{Domains, Evals};
 use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::utils::LagrangeEvaluations;
@@ -176,7 +176,7 @@ impl<F: FftField> AffineAdditionEvaluations<F>
 }
 
 /// Register polynomials in evaluation form amplified to support degree 4n constraints
-pub struct AffineAdditionRegisters<F: PrimeField, D: DomainFactory<F>> {
+pub struct AffineAdditionRegisters<F: PrimeField, D: DomainSet<F>> {
     pub domains: Domains<F, D>,
     bitmask: Evals<F>,
     // public keys' coordinates
@@ -187,7 +187,7 @@ pub struct AffineAdditionRegisters<F: PrimeField, D: DomainFactory<F>> {
     pub polynomials: AffineAdditionPolynomials<F>,
 }
 
-impl<F: PrimeField, D: DomainFactory<F>> AffineAdditionRegisters<F, D> {
+impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
     pub fn new<IC, OC>(domains: Domains<F, D>,
                keyset: Keyset<IC, OC, D>,
                bitmask: &[bool],
@@ -198,7 +198,7 @@ where
     OC::ScalarField: From<IC::BaseField>,
 {
         assert_eq!(bitmask.len(), keyset.size());
-        let domain_size = keyset.domain.size();
+        let domain_size = keyset.domain().size();
 
         let h = point_in_g1_complement_g::<IC>();
         let apk_acc = bitmask.iter().zip(keyset.pks.iter())
@@ -345,7 +345,7 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
 {
-    pub fn compute_bitmask_booleanity_constraint_polynomial<D: DomainFactory<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) -> DensePolynomial<OC::ScalarField> {
+    pub fn compute_bitmask_booleanity_constraint_polynomial<D: DomainSet<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) -> DensePolynomial<OC::ScalarField> {
         let b = &registers.bitmask;
         let mut one_minus_b = registers.domains.constant_4x(OC::ScalarField::one());
         one_minus_b -= b;
@@ -356,7 +356,7 @@ where
         bitmask_at_zeta * (OC::ScalarField::one() - bitmask_at_zeta)
     }
 
-    pub fn compute_conditional_affine_addition_constraint_polynomials<D: DomainFactory<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) ->
+    pub fn compute_conditional_affine_addition_constraint_polynomials<D: DomainSet<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) ->
     (DensePolynomial<OC::ScalarField>, DensePolynomial<OC::ScalarField>) {
         let b = &registers.bitmask;
         let mut one_minus_b = registers.domains.constant_4x(OC::ScalarField::one());
@@ -460,7 +460,7 @@ where
     }
 
     // TODO: better name
-    pub fn compute_public_inputs_constraint_polynomials<D: DomainFactory<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) ->
+    pub fn compute_public_inputs_constraint_polynomials<D: DomainSet<OC::ScalarField>>(registers: &AffineAdditionRegisters<OC::ScalarField, D>) ->
     (DensePolynomial<OC::ScalarField>, DensePolynomial<OC::ScalarField>) {
         let [x1, y1] = &registers.partial_sums;
         // The accumulator's first and last values. Reading them out of the 4x evaluation vector
@@ -469,7 +469,7 @@ where
         // register polynomial at w^0 and w^(n-1) is exact for any domain and costs O(n) here,
         // against the O(n log n) transforms that dominate.
         let [acc_x_poly, acc_y_poly] = &registers.polynomials.partial_sums;
-        let last_element = registers.domains.domain.element(registers.domains.size - 1);
+        let last_element = registers.domains.domain().element(registers.domains.size - 1);
         let [h_x, h_y] = [acc_x_poly, acc_y_poly].map(|p| p.evaluate(&OC::ScalarField::one()));
         let [apk_plus_h_x, apk_plus_h_y] =
             [acc_x_poly, acc_y_poly].map(|p| p.evaluate(&last_element));
@@ -520,7 +520,7 @@ fn mul_by_x<F: Field>(p: &DensePolynomial<F>) -> DensePolynomial<F> {
 
 #[cfg(test)]
 mod tests {
-    type TestDomain = crate::Radix2Domain<ark_bw6_761::Fr>;
+    type TestDomain = crate::Radix2DomainSet<ark_bw6_761::Fr>;
     type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
     use ark_ec::CurveGroup;
     use ark_poly::Polynomial;
@@ -629,7 +629,7 @@ mod tests {
 
         let apk = keyset.aggregate(&bits).into_affine();
         let zeta = Fr::rand(rng);
-        let evals_at_zeta = utils::lagrange_evaluations(zeta, &registers.domains.domain);
+        let evals_at_zeta = utils::lagrange_evaluations(zeta, registers.domains.domain());
         let acc_polys = registers.get_register_polynomials().partial_sums;
         let (x1, y1) = (acc_polys[0].evaluate(&zeta), acc_polys[1].evaluate(&zeta));
         assert_eq!(

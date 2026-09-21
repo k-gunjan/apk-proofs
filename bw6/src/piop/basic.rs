@@ -5,7 +5,7 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
 use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use crate::domain::{DomainFactory, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
 use crate::piop::{ProverProtocol, RegisterEvaluations};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials};
@@ -27,7 +27,7 @@ impl<F: FftField> RegisterEvaluations<F> for AffineAdditionEvaluationsWithoutBit
     }
 }
 
-pub struct BasicRegisterBuilder<F: PrimeField, D: DomainFactory<F>> {
+pub struct BasicRegisterBuilder<F: PrimeField, D: DomainSet<F>> {
     registers: AffineAdditionRegisters<F, D>,
     register_evaluations: Option<AffineAdditionEvaluations<F>>,
 }
@@ -38,7 +38,7 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     type P1 = PartialSumsPolynomials<OC::ScalarField>;
     type P2 = ();

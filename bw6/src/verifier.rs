@@ -6,7 +6,7 @@ use w3f_pcs::pcs::{PcsParams, RawVerifierKey, PCS};
 use merlin::{Transcript as MerlinTranscript, TranscriptRng};
 
 use crate::{utils, AccountablePublicInput, CountingProof, CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof, CommitmentExt};
-use crate::domain::{DomainError, DomainFactory, FftDomain};
+use crate::domain::{DomainError, DomainSet, FftDomain};
 use crate::fsrng::fiat_shamir_rng;
 use crate::piop::{RegisterCommitments, RegisterEvaluations, VerifierProtocol};
 use crate::piop::affine_addition::AffineAdditionEvaluations;
@@ -30,9 +30,9 @@ where
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
-    domain: D,
+    domain: D::Domain,
     verifier_key: <S::Params as PcsParams>::RVK,
     pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
     preprocessed_transcript: Transcript,
@@ -46,7 +46,7 @@ where
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
     S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
-    D: DomainFactory<OC::ScalarField>,
+    D: DomainSet<OC::ScalarField>,
 {
     pub fn new(
         verifier_key: <S::Params as PcsParams>::RVK,
@@ -68,13 +68,7 @@ where
         mut empty_transcript: Transcript,
     ) -> Result<Self, DomainError> {
         let domain_size = pks_comm.domain_size as usize;
-        let domain = D::try_create_domain(domain_size)?;
-        if domain.size() != domain_size {
-            return Err(DomainError::NotExact {
-                requested: domain_size,
-                nearest: domain.size(),
-            });
-        }
+        let domain = D::base_for_exact_size(domain_size)?;
 
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(&mut empty_transcript, &domain, &verifier_key);
         <Transcript as ApkTranscript<OC::ScalarField>>::set_keyset_commitment(&mut empty_transcript, &pks_comm);

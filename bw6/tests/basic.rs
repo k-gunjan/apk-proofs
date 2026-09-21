@@ -1,7 +1,10 @@
 mod helper;
 
 fn main() {
-    let log_n = helper::parse_args_or(8, "basic");
-    println!("Running test for the 'basic' scheme for N = 2^{}", log_n);
-    apk_proofs::test_helpers::test_simple_scheme((1usize << log_n) - 1);
+    let validators = helper::parse_args_or(255, "basic");
+    println!(
+        "Running test for the 'basic' scheme for {} validators",
+        validators
+    );
+    apk_proofs::test_helpers::test_simple_scheme(validators);
 }
