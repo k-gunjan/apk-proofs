@@ -106,7 +106,9 @@ mod tests {
         use crate::domain::{DomainError, DomainSet};
         assert_eq!(
             TestDomain::for_min_size(2usize.pow(50)).err(),
-            Some(DomainError::TooLarge { requested: 2usize.pow(50) })
+            Some(DomainError::TooLarge {
+                requested: 2usize.pow(50)
+            })
         );
     }
 }

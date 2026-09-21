@@ -8,23 +8,24 @@ repository = "https://github.com/w3f/apk-proofs"
 categories = ["cryptography"]
 
 [dependencies]
-ark-std = { version = "0.5", default-features = false }
-ark-ff = { version = "0.5", default-features = false }
-ark-ec = { version = "0.5", default-features = false }
-ark-poly = { version = "0.5", default-features = false }
-ark-serialize = { version = "0.5", default-features = false, features = ["derive"] }
+ark-std = { version = "0.6", default-features = false }
+ark-ff = { version = "0.6", default-features = false }
+ark-ec = { version = "0.6", default-features = false }
+ark-poly = { version = "0.6", default-features = false }
+ark-serialize = { version = "0.6", default-features = false, features = ["derive"] }
 
-ark-bw6-761 = { version = "0.5", default-features = false }
-ark-bw6-767 = { version = "0.5", default-features = false }
-ark-bls12-377 = { version = "0.5", default-features = false, features = ["curve"] }
-ark-bls12-381 = { version = "0.5", default-features = false, features = ["curve"] }
+ark-bw6-761 = { version = "0.6", default-features = false }
+ark-bw6-767 = { version = "0.6", default-features = false }
+ark-bls12-377 = { version = "0.6", default-features = false, features = ["curve"] }
+ark-bls12-381 = { version = "0.6", default-features = false, features = ["curve"] }
 
-# Pinned: an unpinned git dependency makes the build non-reproducible, which would
-# quietly void the Docker-based reproducibility the milestone promises.
+# Tracks the default branch rather than a fixed revision, so `cargo update` picks up upstream
+# fixes. The trade is that the build is not reproducible from the manifest alone; Cargo.lock is
+# what pins it, so it must be committed.
 #
-# NOTE: this revision cannot generate a KZG SRS for BW6-767 — URS::from_trapdoor asserts
-# n <= 2^TWO_ADICITY, which is 2 there. See instances::bls12_381_bw6_767::kzg::generate_urs.
-w3f-pcs = { git = "https://github.com/w3f/fflonk", rev = "26b6e2e15f7fa90eee97ebd039a4146a8dafc695" }
+# NOTE: URS::from_trapdoor still asserts n <= 2^TWO_ADICITY, which is 2 on BW6-767, so a KZG SRS
+# for that curve cannot come from upstream. See instances::bls12_381_bw6_767::kzg::generate_urs.
+w3f-pcs = { git = "https://github.com/w3f/fflonk" }
 
 rand = "0.8"
 merlin = "3.0"

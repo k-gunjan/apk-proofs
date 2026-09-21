@@ -1,6 +1,9 @@
-use std::ops::AddAssign;
-use ark_ec::{AdditiveGroup, bw6::{BW6Config, G1Projective}};
+use ark_ec::{
+    bw6::{BW6Config, G1Projective},
+    AdditiveGroup,
+};
 use ark_ff::{BitIteratorBE, Zero};
+use std::ops::AddAssign;
 
 // See https://github.com/celo-org/zexe/blob/master/algebra/src/bw6_761/curves/g1.rs#L37-L71
 // and also https://github.com/celo-org/zexe/blob/master/scripts/glv_lattice_basis/src/lib.rs
@@ -35,15 +38,13 @@ pub fn subgroup_check<C: BW6Config>(p: &G1Projective<C>, omega: C::Fp, u: &[u64]
     (up + p + glv_endomorphism_proj::<C>(&(u3p - u2p + p), omega)).is_zero()
 }
 
-
 #[cfg(test)]
 mod tests {
+    use crate::instances::bls12_377_bw6_761::{LAMBDA, OMEGA, U};
     use ark_bw6_761::{Config, Fq, G1Affine};
     use ark_ec::{AffineRepr, CurveGroup};
     use ark_ff::{Field, One};
     use ark_std::{test_rng, UniformRand};
-    use crate::instances::bls12_377_bw6_761::{OMEGA, U, LAMBDA};
-
 
     use super::*;
 
@@ -102,6 +103,10 @@ mod tests {
 
         assert!(point_not_in_g1.is_on_curve());
         assert!(!point_not_in_g1.is_in_correct_subgroup_assuming_on_curve());
-        assert!(!subgroup_check::<Config>(&point_not_in_g1.into_group(), OMEGA, U));
+        assert!(!subgroup_check::<Config>(
+            &point_not_in_g1.into_group(),
+            OMEGA,
+            U
+        ));
     }
 }

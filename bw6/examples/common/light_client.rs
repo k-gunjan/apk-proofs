@@ -94,7 +94,9 @@ where
 {
     CACHE.with(|cell| {
         let mut cell = cell.borrow_mut();
-        if let Some(cached) = cell.as_ref().and_then(|b| b.downcast_ref::<KeysetCommitmentOf<C>>())
+        if let Some(cached) = cell
+            .as_ref()
+            .and_then(|b| b.downcast_ref::<KeysetCommitmentOf<C>>())
         {
             return cached.clone();
         }
@@ -121,11 +123,7 @@ where
         PublicKey::from(&self.0)
     }
 
-    fn approve(
-        &self,
-        new_validator_set: &ValidatorSet<C>,
-        params: &PcsParamsOf<C>,
-    ) -> Approval<C> {
+    fn approve(&self, new_validator_set: &ValidatorSet<C>, params: &PcsParamsOf<C>) -> Approval<C> {
         let new_validator_set_commitment = shared_keyset_commitment::<C, _>(|| {
             Apk::<C>::commit_keyset(params, new_validator_set.raw_public_keys()).1
         });
@@ -145,7 +143,10 @@ pub struct ValidatorSet<C: ApkConfig> {
 
 impl<C: ApkConfig> Clone for ValidatorSet<C> {
     fn clone(&self) -> Self {
-        Self { validators: self.validators.to_vec(), quorum: self.quorum }
+        Self {
+            validators: self.validators.to_vec(),
+            quorum: self.quorum,
+        }
     }
 }
 
@@ -168,7 +169,10 @@ where
     }
 
     fn raw_public_keys(&self) -> Vec<C::InnerCurve> {
-        self.public_keys().iter().map(|pk| pk.as_group().clone()).collect()
+        self.public_keys()
+            .iter()
+            .map(|pk| pk.as_group().clone())
+            .collect()
     }
 
     fn size(&self) -> usize {
@@ -183,10 +187,12 @@ where
         new_era();
         let new_validator_set = ValidatorSet::new(self.size(), self.quorum, rng);
 
-        let t_approval = start_timer!(|| format!(
+        let t_approval = start_timer!(|| {
+            format!(
             "Each (honest) validator computes the commitment to the new validator set of size {} and signs the commitment",
             new_validator_set.size()
-        ));
+        )
+        });
 
         let approvals = self
             .validators
@@ -228,7 +234,11 @@ where
         genesis_keyset_commitment: KeysetCommitmentOf<C>,
         quorum: usize,
     ) -> Self {
-        Self { params, current_validator_set_commitment: genesis_keyset_commitment, quorum }
+        Self {
+            params,
+            current_validator_set_commitment: genesis_keyset_commitment,
+            quorum,
+        }
     }
 
     fn verify_aggregates(
@@ -310,10 +320,12 @@ where
         Signature<Inner<C>>,
         KeysetCommitmentOf<C>,
     ) {
-        let t_approval = start_timer!(|| format!(
+        let t_approval = start_timer!(|| {
+            format!(
             "Helper aggregates {} individual signatures on the same commitment and generates accountable light client proof",
             approvals.len()
-        ));
+        )
+        });
 
         let new_validator_set_commitment = approvals[0].comm.clone();
         // Compared as group elements rather than through a HashSet: `PublicKey<E>`'s derived
@@ -347,7 +359,12 @@ where
         end_timer!(t_approval);
         println!();
 
-        (public_input, proof, aggregate_signature, new_validator_set_commitment)
+        (
+            public_input,
+            proof,
+            aggregate_signature,
+            new_validator_set_commitment,
+        )
     }
 }
 
@@ -406,14 +423,14 @@ where
         genesis_validator_set_commitment.clone(),
         params.clone(),
     );
-    let mut light_client =
-        LightClient::<C>::init(params, genesis_validator_set_commitment, quorum);
+    let mut light_client = LightClient::<C>::init(params, genesis_validator_set_commitment, quorum);
 
     let mut current_validator_set = genesis_validator_set;
 
     for era in 1..=n_eras {
         println!("\nEra {}\n", era);
-        let (new_validator_set, approvals) = current_validator_set.rotate(&light_client.params, rng);
+        let (new_validator_set, approvals) =
+            current_validator_set.rotate(&light_client.params, rng);
 
         let (public_input, proof, aggregate_signature, new_validator_set_commitment) =
             helper.aggregate_approvals(new_validator_set.clone(), approvals);

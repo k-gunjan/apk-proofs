@@ -22,7 +22,6 @@ impl AsRef<[u64]> for Bitmask {
 // As a consequence 64-bit chunks are reversed to form equivalent u64 limbs.
 // The highest limb of the bitmask is right padded with 0s.
 impl Bitmask {
-
     pub fn from_bits(bits: &[bool]) -> Self {
         // repr = bitmask + padding
         let bitmask_size = bits.len();
@@ -36,8 +35,13 @@ impl Bitmask {
 
         let limbs_bits_iter = repr_bits.chunks_exact(BITS_IN_LIMB);
         assert_eq!(limbs_bits_iter.remainder().len(), 0);
-        let limbs = limbs_bits_iter.map(|bits| bits_to_limb(bits.try_into().unwrap())).collect();
-        Self { limbs, padding_size }
+        let limbs = limbs_bits_iter
+            .map(|bits| bits_to_limb(bits.try_into().unwrap()))
+            .collect();
+        Self {
+            limbs,
+            padding_size,
+        }
     }
 
     pub fn to_bits(&self) -> Vec<bool> {
@@ -47,7 +51,8 @@ impl Bitmask {
     }
 
     pub fn to_bits_as_field_elements<F: PrimeField>(&self) -> Vec<F> {
-        self.to_bits().iter()
+        self.to_bits()
+            .iter()
             .map(|b| if *b { F::one() } else { F::zero() })
             .collect()
     }
@@ -60,7 +65,10 @@ impl Bitmask {
 
     // TODO: padding
     pub fn count_ones(&self) -> usize {
-        self.limbs.iter().map(|limb| usize::try_from(limb.count_ones()).unwrap()).sum()
+        self.limbs
+            .iter()
+            .map(|limb| usize::try_from(limb.count_ones()).unwrap())
+            .sum()
     }
 
     /// Splits the bits into chunks of the specified size and converts the chunks into field elements,
@@ -70,10 +78,12 @@ impl Bitmask {
         let bits_in_chunk = BITS_IN_LIMB * limbs_in_chunk;
         let capacity = (F::MODULUS_BIT_SIZE - 1).try_into().unwrap();
         assert!(bits_in_chunk <= capacity);
-        self.limbs.chunks(limbs_in_chunk).map(limbs_to_field_elements::<F>).collect()
+        self.limbs
+            .chunks(limbs_in_chunk)
+            .map(limbs_to_field_elements::<F>)
+            .collect()
     }
 }
-
 
 // may overflow
 fn div_ceil(a: usize, b: usize) -> usize {
@@ -82,7 +92,9 @@ fn div_ceil(a: usize, b: usize) -> usize {
 
 // Assembles a u64 limb from a little-endian bit slice.
 fn bits_to_limb(bits: &[bool; 64]) -> u64 {
-    bits.iter().rev().fold(0u64, |limb_acc, next_bit| (limb_acc << 1) ^ (*next_bit as u64))
+    bits.iter().rev().fold(0u64, |limb_acc, next_bit| {
+        (limb_acc << 1) ^ (*next_bit as u64)
+    })
 }
 
 fn limbs_to_field_elements<F: PrimeField>(limbs: &[u64]) -> F {
@@ -126,7 +138,15 @@ mod tests {
         let bits = _random_bits(1024, 1.0 / 2.0, &mut test_rng());
         let bitmask = Bitmask::from_bits(&bits);
         let chunks = bitmask.to_chunks_as_field_elements::<Fr>(1);
-        assert_eq!(chunks, bitmask.limbs.iter().cloned().map(Fr::from).collect::<Vec<_>>());
+        assert_eq!(
+            chunks,
+            bitmask
+                .limbs
+                .iter()
+                .cloned()
+                .map(Fr::from)
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -136,7 +156,6 @@ mod tests {
         let chunks = bitmask.to_chunks_as_field_elements::<Fr>(4);
         assert_eq!(chunks.len(), 4);
     }
-
 
     pub fn _test_to_field_element(set_bit_positions: Vec<usize>, expected: u128) {
         let mut bits = vec![false; 128];

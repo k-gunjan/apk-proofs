@@ -34,7 +34,11 @@ pub fn barycentric_eval_at<F: PrimeField, D: FftDomain<F>>(z: F, evals: &Vec<F>,
     z_n * s
 }
 
-pub fn barycentric_eval_binary_at<F: PrimeField, D: FftDomain<F>>(z: F, evals: &Bitmask, domain: &D) -> F {
+pub fn barycentric_eval_binary_at<F: PrimeField, D: FftDomain<F>>(
+    z: F,
+    evals: &Bitmask,
+    domain: &D,
+) -> F {
     let mut z_n = z.pow([domain.size() as u64]);
     z_n -= F::one();
     z_n *= &domain.size_inv(); // (z^n-1)/n
@@ -56,14 +60,17 @@ pub fn barycentric_eval_binary_at<F: PrimeField, D: FftDomain<F>>(z: F, evals: &
 /// Values of the polynomials at a point z
 pub struct LagrangeEvaluations<F: FftField> {
     pub vanishing_polynomial: F, // z^n - 1
-    pub l_first: F, // L_0(z)
-    pub l_last: F, // L_{n-1}(z)
+    pub l_first: F,              // L_0(z)
+    pub l_last: F,               // L_{n-1}(z)
     pub zeta_minus_omega_inv: F, // z - \omega^{-1}
-    pub zeta_omega: F, // z * \omega
+    pub zeta_omega: F,           // z * \omega
 }
 
 //TODO: move to domains
-pub fn lagrange_evaluations<F: PrimeField, D: FftDomain<F>>(z: F, domain: &D) -> LagrangeEvaluations<F> {
+pub fn lagrange_evaluations<F: PrimeField, D: FftDomain<F>>(
+    z: F,
+    domain: &D,
+) -> LagrangeEvaluations<F> {
     // TODO: reuse this code with barycentric_eval methods
     let z_n = z.pow([domain.size() as u64]);
 
@@ -81,27 +88,19 @@ pub fn lagrange_evaluations<F: PrimeField, D: FftDomain<F>>(z: F, domain: &D) ->
     }
 }
 
-
-pub fn mul_then_add<G: AffineRepr>(
-    bases: &[G],
-    scalars: &[G::ScalarField],
-) -> G::Group {
+pub fn mul_then_add<G: AffineRepr>(bases: &[G], scalars: &[G::ScalarField]) -> G::Group {
     bases.iter().zip(scalars).map(|(&b, s)| b * s).sum()
 }
 
-pub fn horner<G: AffineRepr>(
-    bases: &[G],
-    nu: G::ScalarField,
-) -> G {
-    bases.iter().rev().fold(G::Group::zero(), |acc, b|
-        (acc * nu) + b
-    ).into_affine()
+pub fn horner<G: AffineRepr>(bases: &[G], nu: G::ScalarField) -> G {
+    bases
+        .iter()
+        .rev()
+        .fold(G::Group::zero(), |acc, b| (acc * nu) + b)
+        .into_affine()
 }
 
-pub fn horner_field<F: Field>(
-    bases: &[F],
-    nu: F,
-) -> F {
+pub fn horner_field<F: Field>(bases: &[F], nu: F) -> F {
     bases.iter().rev().fold(F::zero(), |acc, b| nu * acc + b)
 }
 
@@ -116,23 +115,20 @@ pub fn powers<F: Field>(base: F, max_exp: usize) -> Vec<F> {
     for _ in 1..max_exp {
         curr *= base;
         result.push(curr);
-    };
+    }
     result
 }
 
-
-pub fn randomize<P, F>(
-    r: F,
-    polys: &[P]
-) -> P
-    where
-        F: Field,
-        P: Polynomial<F> {
+pub fn randomize<P, F>(r: F, polys: &[P]) -> P
+where
+    F: Field,
+    P: Polynomial<F>,
+{
     let mut res = P::zero();
     if polys.is_empty() {
         return res;
     }
-    let powers = powers(r, polys.len()-1);
+    let powers = powers(r, polys.len() - 1);
 
     powers.into_iter().zip(polys).for_each(|(r, p)| {
         res += (r, p);
@@ -140,13 +136,12 @@ pub fn randomize<P, F>(
     res
 }
 
-
 #[cfg(test)]
 mod tests {
     use ark_ff::{Field, One};
     use ark_poly::{EvaluationDomain, Evaluations, Polynomial, Radix2EvaluationDomain};
-    use ark_std::{test_rng, UniformRand};
     use ark_std::convert::TryInto;
+    use ark_std::{test_rng, UniformRand};
 
     use crate::test_helpers::_random_bits;
 
@@ -156,23 +151,41 @@ mod tests {
     pub fn test_barycentric_eval() {
         let rng = &mut test_rng();
         let n = 2u32.pow(16);
-        let domain = Radix2EvaluationDomain::new(std::convert::TryInto::try_into(n).unwrap()).unwrap();
+        let domain =
+            Radix2EvaluationDomain::new(std::convert::TryInto::try_into(n).unwrap()).unwrap();
         let z = ark_bw6_761::Fr::rand(rng);
 
-        let evals = (0..n).map(|_| ark_bw6_761::Fr::rand(rng)).collect::<Vec<_>>();
+        let evals = (0..n)
+            .map(|_| ark_bw6_761::Fr::rand(rng))
+            .collect::<Vec<_>>();
         let poly = Evaluations::from_vec_and_domain(evals.clone(), domain).interpolate();
         let poly_at_z = poly.evaluate(&z);
         let rdomain = crate::Radix2Domain(domain);
         assert_eq!(barycentric_eval_at(z, &evals, &rdomain), poly_at_z);
 
         let bitmask = Bitmask::from_bits(&_random_bits(n.try_into().unwrap(), 1.0 / 2.0, rng));
-        let bits_as_field_elements = bitmask.to_bits().iter()
-            .map(|b| if *b { ark_bw6_761::Fr::one() } else { ark_bw6_761::Fr::zero() })
+        let bits_as_field_elements = bitmask
+            .to_bits()
+            .iter()
+            .map(|b| {
+                if *b {
+                    ark_bw6_761::Fr::one()
+                } else {
+                    ark_bw6_761::Fr::zero()
+                }
+            })
             .collect::<Vec<_>>();
-        let bits_poly = Evaluations::from_vec_and_domain(bits_as_field_elements.clone(), domain).interpolate();
+        let bits_poly =
+            Evaluations::from_vec_and_domain(bits_as_field_elements.clone(), domain).interpolate();
         let bits_poly_at_z = bits_poly.evaluate(&z);
-        assert_eq!(barycentric_eval_at(z, &bits_as_field_elements, &rdomain), bits_poly_at_z);
-        assert_eq!(barycentric_eval_binary_at(z, &bitmask, &rdomain), bits_poly_at_z);
+        assert_eq!(
+            barycentric_eval_at(z, &bits_as_field_elements, &rdomain),
+            bits_poly_at_z
+        );
+        assert_eq!(
+            barycentric_eval_binary_at(z, &bitmask, &rdomain),
+            bits_poly_at_z
+        );
     }
 
     #[test]
@@ -182,7 +195,9 @@ mod tests {
         let rng = &mut test_rng();
 
         let nu = ark_bw6_761::Fr::rand(rng);
-        let bases = (0..n).map(|_| ark_bw6_761::G1Projective::rand(rng).into_affine()).collect::<Vec<_>>();
+        let bases = (0..n)
+            .map(|_| ark_bw6_761::G1Projective::rand(rng).into_affine())
+            .collect::<Vec<_>>();
 
         let powers = (0..n).map(|i| nu.pow([i as u64])).collect::<Vec<_>>();
 
@@ -198,7 +213,10 @@ mod tests {
 
         let z = ark_bw6_761::Fr::rand(rng);
         let evals = lagrange_evaluations(z, &crate::Radix2Domain(domain));
-        assert_eq!(evals.vanishing_polynomial, domain.evaluate_vanishing_polynomial(z));
+        assert_eq!(
+            evals.vanishing_polynomial,
+            domain.evaluate_vanishing_polynomial(z)
+        );
         let coeffs = domain.evaluate_all_lagrange_coefficients(z);
         assert_eq!(evals.l_first, coeffs[0]);
         assert_eq!(evals.l_last, coeffs[n - 1]);

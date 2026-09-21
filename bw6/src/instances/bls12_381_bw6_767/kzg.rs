@@ -10,9 +10,9 @@
 //! - **Verification**: Single pairing check for batch verification
 //! - **Efficiency**: Most efficient option for proof size and verification time
 
-use w3f_pcs::pcs::kzg::commitment::KzgCommitment;
-use w3f_pcs::pcs::kzg::KZG;
 use ark_bw6_767::BW6_767;
+use w3f_pcs::pcs::commitment::WrappedAffine;
+use w3f_pcs::pcs::kzg::KZG;
 
 use super::*;
 use crate::{CountingProof, KeysetCommitment, PackedProof, Prover, SimpleProof, Verifier};
@@ -25,7 +25,7 @@ use crate::{CountingProof, KeysetCommitment, PackedProof, Prover, SimpleProof, V
 pub type Pcs = KZG<BW6_767>;
 
 /// KZG commitment (a single BW6-761 G1 point)
-pub type Commitment = KzgCommitment<BW6_767>;
+pub type Commitment = WrappedAffine<OuterCurve>;
 
 /// Generates a KZG structured reference string for BW6-767.
 ///
@@ -77,7 +77,7 @@ pub fn generate_urs<R: ark_std::rand::RngCore>(
 // ============================================================================
 
 /// Keyset commitment using KZG on BW6-761
-/// 
+///
 /// Contains commitments to the two Lagrange-basis polynomials representing
 /// the x and y coordinates of the public keys.
 pub type KeysetCommitment381 = KeysetCommitment<OuterScalar, Commitment>;
@@ -93,33 +93,33 @@ pub type Verifier381 = Verifier<InnerCurve, OuterCurve, Pcs, super::Domains767>;
 // ============================================================================
 
 /// Simple (basic) APK proof using KZG commitments
-/// 
+///
 /// This is the most straightforward proof that includes:
 /// - Commitments to partial sum polynomials
 /// - Quotient polynomial commitment
 /// - KZG opening proofs
 /// - Evaluations at the challenge point
-/// 
+///
 /// **Proof size**: ~576 bytes (5 commitments + 6 field elements)
 pub type SimpleProof381 = SimpleProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
 
 /// Packed (succinct) APK proof using KZG commitments
-/// 
+///
 /// This proof packs the bitmask into field elements for better efficiency
 /// when the bitmask is large. Includes additional commitments and evaluations
 /// for the packing verification.
-/// 
+///
 /// **Proof size**: ~864 bytes (8 commitments + 9 field elements)
-/// 
+///
 /// **Best for**: Large validator sets (n > 256) with varying participation
 pub type PackedProof381 = PackedProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
 
 /// Counting APK proof using KZG commitments
-/// 
+///
 /// This proof only commits to the count of participants rather than their
 /// specific identities. More efficient when only the threshold matters.
-/// 
+///
 /// **Proof size**: ~768 bytes (7 commitments + 8 field elements)
-/// 
+///
 /// **Best for**: Threshold signatures where individual accountability is not required
 pub type CountingProof381 = CountingProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;

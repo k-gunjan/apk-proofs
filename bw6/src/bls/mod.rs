@@ -1,12 +1,12 @@
 //! Generic BLS signature implementations over a pairing-friendly curve
 
-use std::borrow::Borrow;
-use std::ops::Neg;
-use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};
 use ark_ec::pairing::Pairing;
+use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};
 use ark_ff::{UniformRand, Zero};
 use ark_serialize::*;
 use rand::Rng;
+use std::borrow::Borrow;
+use std::ops::Neg;
 
 #[derive(Clone, Debug)]
 pub struct Signature<E: Pairing>(E::G2);
@@ -24,17 +24,9 @@ impl<E: Pairing> Signature<E> {
     }
     /// Aggregate multiple signatures into a single signature
     pub fn aggregate<S: Borrow<Self>>(signatures: impl IntoIterator<Item = S>) -> Self {
-        Signature(
-            signatures
-            .into_iter()
-            .map(|s| s.borrow().0)
-            .sum::<E::G2>()
-        )
-
+        Signature(signatures.into_iter().map(|s| s.borrow().0).sum::<E::G2>())
     }
 }
-
-
 
 /// BLS secret key
 #[derive(Clone, Debug, CanonicalSerialize, CanonicalDeserialize)]
@@ -73,11 +65,9 @@ impl<E: Pairing> SecretKey<E> {
     /// let signature = sk.sign(&message);
     /// ```
     pub fn sign(&self, message: &E::G2) -> Signature<E> {
-       Signature(*message * self.as_ref())
+        Signature(*message * self.as_ref())
     }
 }
-
-
 
 /// BLS public key
 ///
@@ -114,12 +104,7 @@ impl<E: Pairing> PublicKey<E> {
     /// let aggregate_pk = PublicKey::aggregate([pk1, pk2]);
     /// ```
     pub fn aggregate<P: Borrow<Self>>(public_keys: impl IntoIterator<Item = P>) -> Self {
-        PublicKey(
-            public_keys
-                .into_iter()
-                .map(|p| p.borrow().0)
-                .sum::<E::G1>()
-        )
+        PublicKey(public_keys.into_iter().map(|p| p.borrow().0).sum::<E::G1>())
     }
 
     /// Verify a signature against the public key and the message
@@ -141,19 +126,20 @@ impl<E: Pairing> PublicKey<E> {
     /// ```
     pub fn verify(&self, signature: &Signature<E>, message: &E::G2) -> bool {
         E::multi_pairing(
-            [E::G1Affine::generator().into_group().neg().into_affine(), self.0.into_affine()],
+            [
+                E::G1Affine::generator().into_group().neg().into_affine(),
+                self.0.into_affine(),
+            ],
             [signature.as_ref().into_affine(), message.into_affine()],
         )
         .is_zero()
     }
 }
 
-
-
 #[cfg(test)]
 mod tests {
-    use ark_std::test_rng;
     use ark_bls12_377::{Bls12_377, G2Projective};
+    use ark_std::test_rng;
 
     use super::*;
 
@@ -162,10 +148,14 @@ mod tests {
         let rng = &mut test_rng();
         let message = G2Projective::rand(rng);
 
-        let sks = (0..10).map(|_| SecretKey::<Bls12_377>::new(rng)).collect::<Vec<_>>();
+        let sks = (0..10)
+            .map(|_| SecretKey::<Bls12_377>::new(rng))
+            .collect::<Vec<_>>();
         let pks = sks.iter().map(PublicKey::from).collect::<Vec<_>>();
         let sigs = sks.iter().map(|sk| sk.sign(&message)).collect::<Vec<_>>();
-        pks.iter().zip(sigs.iter()).for_each(|(pk, sig)| assert!(pk.verify(sig, &message)));
+        pks.iter()
+            .zip(sigs.iter())
+            .for_each(|(pk, sig)| assert!(pk.verify(sig, &message)));
 
         let apk = PublicKey::aggregate(pks);
         let asig = Signature::aggregate(sigs);

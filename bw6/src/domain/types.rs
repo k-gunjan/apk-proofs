@@ -1,8 +1,6 @@
 use ark_ff::PrimeField;
-use ark_poly::{
-    univariate::{DenseOrSparsePolynomial, DensePolynomial},
-    DenseUVPolynomial,
-};
+use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
+use ark_std::Zero;
 
 /// A multiplicative evaluation domain: a subgroup `H = <w>` of `F*` of order `n`, together with
 /// forward and inverse transforms between coefficient and evaluation form.
@@ -52,19 +50,44 @@ pub trait FftDomain<F: PrimeField>: Clone + Sized {
     ///
     /// Done in coefficient form rather than pointwise over a coset, which keeps this correct
     /// whether or not `H` is contained in the larger evaluation domain.
+    ///
+    /// Written out rather than delegated to `DenseOrSparsePolynomial::divide_with_q_and_r`,
+    /// which since ark-poly 0.6 switches to Hensel division once the divisor's degree reaches
+    /// 256 and multiplies by FFT to do it — so it panics with "field is not smooth enough to
+    /// construct domain" on exactly the field this crate exists to support. Dividing by
+    /// `X^n - 1` needs none of that: `X^i = X^(i-n) * (X^n - 1) + X^(i-n)`, so sweeping the
+    /// coefficients from the top down carries each one into the quotient and into position
+    /// `i - n`, in `O(deg p)` with no multiplications at all.
     fn divide_by_vanishing_poly(
         &self,
         poly: &DensePolynomial<F>,
     ) -> (DensePolynomial<F>, DensePolynomial<F>) {
-        let mut vanishing_coeffs = vec![F::zero(); self.size() + 1];
-        vanishing_coeffs[0] = -F::one();
-        vanishing_coeffs[self.size()] = F::one();
-        let vanishing_poly = DensePolynomial::from_coefficients_vec(vanishing_coeffs);
+        let n = self.size();
+        let mut remainder = poly.coeffs.clone();
+        if remainder.len() <= n {
+            return (
+                DensePolynomial::zero(),
+                DensePolynomial::from_coefficients_vec(remainder),
+            );
+        }
 
-        let a = DenseOrSparsePolynomial::from(poly);
-        let b = DenseOrSparsePolynomial::from(&vanishing_poly);
-        a.divide_with_q_and_r(&b)
-            .expect("division by the vanishing polynomial failed")
+        let mut quotient = vec![F::zero(); remainder.len() - n];
+        // Top down, so that a coefficient carried into position `i - n` is itself carried
+        // further when `i - n` is still at least `n` (i.e. when deg p >= 2n).
+        for i in (n..remainder.len()).rev() {
+            let c = remainder[i];
+            if c.is_zero() {
+                continue;
+            }
+            quotient[i - n] += c;
+            remainder[i - n] += c;
+        }
+        remainder.truncate(n);
+
+        (
+            DensePolynomial::from_coefficients_vec(quotient),
+            DensePolynomial::from_coefficients_vec(remainder),
+        )
     }
 
     /// All Lagrange basis polynomials evaluated at `x`:
@@ -88,27 +111,6 @@ pub trait FftDomain<F: PrimeField>: Clone + Sized {
             power *= self.generator();
         }
         result
-    }
-}
-
-/// Constructs a domain of at least the requested size.
-///
-/// The size is rounded **up** to the next size the field actually supports, so callers must read
-/// back `size()` rather than assuming they got what they asked for.
-///
-/// `F` is a type parameter rather than an associated type on purpose: as an associated type it
-/// forces every bound to be spelled `D: FftDomain<F> + DomainFactory<Field = F>`, which is both
-/// noisy and easy to get wrong.
-pub trait DomainFactory<F: PrimeField>: FftDomain<F> {
-    /// The smallest domain of at least `size`.
-    fn try_create_domain(size: usize) -> Result<Self, DomainError>;
-
-    /// Panicking shorthand for [`try_create_domain`](Self::try_create_domain).
-    ///
-    /// Only for sizes the caller already knows are reachable. Anything derived from untrusted
-    /// input — a keyset commitment, an RPC argument — should use the fallible form.
-    fn create_domain(size: usize) -> Self {
-        Self::try_create_domain(size).expect("no evaluation domain of the requested size")
     }
 }
 
@@ -148,3 +150,104 @@ impl core::fmt::Display for DomainError {
 /// configuration that cannot produce one fails to compile, instead of panicking inside the
 /// prover after the caller has already built a keyset.
 pub trait SupportsPackedScheme {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{CooleyTukeyDomain, Radix2Domain};
+    use ark_poly::univariate::DenseOrSparsePolynomial;
+    use ark_std::{test_rng, One, UniformRand};
+
+    /// The hand-written sweep must agree with arkworks' generic division, coefficient for
+    /// coefficient, on a field where arkworks can actually run.
+    ///
+    /// Sizes are chosen either side of ark-poly's `SWITCH_TO_HENSEL_DIV` (256), so both of
+    /// arkworks' own branches are the reference at least once.
+    #[test]
+    fn dividing_by_the_vanishing_polynomial_agrees_with_arkworks() {
+        use ark_bw6_761::Fr;
+
+        let rng = &mut test_rng();
+        for n in [16usize, 128, 256, 512] {
+            let domain = Radix2Domain::<Fr>::new(n);
+            for degree in [0, n - 1, n, n + 1, 4 * n - 3, 5 * n] {
+                let poly = DensePolynomial::from_coefficients_vec(
+                    (0..=degree).map(|_| Fr::rand(rng)).collect(),
+                );
+
+                let mut vanishing = vec![Fr::zero(); n + 1];
+                vanishing[0] = -Fr::one();
+                vanishing[n] = Fr::one();
+                let vanishing = DensePolynomial::from_coefficients_vec(vanishing);
+                let expected = DenseOrSparsePolynomial::from(&poly)
+                    .divide_with_q_and_r(&DenseOrSparsePolynomial::from(&vanishing))
+                    .unwrap();
+
+                assert_eq!(
+                    domain.divide_by_vanishing_poly(&poly),
+                    expected,
+                    "n = {}, degree = {}",
+                    n,
+                    degree
+                );
+            }
+        }
+    }
+
+    /// The regression. arkworks' division reaches for an FFT once the divisor's degree hits
+    /// 256, which BW6-767 cannot supply, so every domain above 256 used to panic inside the
+    /// prover. Nothing caught it because every APK-381 test ran at domain 253.
+    #[test]
+    fn dividing_by_the_vanishing_polynomial_works_on_a_non_smooth_field() {
+        use ark_bw6_767::Fr;
+
+        let rng = &mut test_rng();
+        // 517 = 11 * 47, the first table entry past the threshold.
+        let domain = CooleyTukeyDomain::<Fr>::new(517).unwrap();
+
+        // Degree 4n - 3 is the highest the prover's constraint polynomial reaches.
+        let quotient = DensePolynomial::from_coefficients_vec(
+            (0..3 * 517 - 2).map(|_| Fr::rand(rng)).collect(),
+        );
+        let remainder = DensePolynomial::from_coefficients_vec(
+            (0..517).map(|_| Fr::rand(rng)).collect(),
+        );
+
+        // Reconstruct q * (X^n - 1) + r without multiplying polynomials, which is itself the
+        // operation this field cannot do by FFT.
+        let mut product = vec![Fr::zero(); quotient.coeffs.len() + 517];
+        for (i, c) in quotient.coeffs.iter().enumerate() {
+            product[i + 517] += c;
+            product[i] -= c;
+        }
+        for (i, c) in remainder.coeffs.iter().enumerate() {
+            product[i] += c;
+        }
+        let dividend = DensePolynomial::from_coefficients_vec(product);
+
+        assert_eq!(domain.divide_by_vanishing_poly(&dividend), (quotient, remainder));
+    }
+
+    /// A polynomial that vanishes on `H` divides exactly. This is the property the prover
+    /// asserts on every proof.
+    #[test]
+    fn a_polynomial_vanishing_on_the_domain_leaves_no_remainder() {
+        use ark_bw6_767::Fr;
+
+        let rng = &mut test_rng();
+        let domain = CooleyTukeyDomain::<Fr>::new(517).unwrap();
+        let large = CooleyTukeyDomain::<Fr>::new(6 * 517).unwrap();
+
+        // Interpolating evaluations that are zero over H gives a multiple of X^n - 1.
+        let mut evals = vec![Fr::zero(); large.size()];
+        for (i, e) in evals.iter_mut().enumerate() {
+            if i % 6 != 0 {
+                *e = Fr::rand(rng);
+            }
+        }
+        let poly = DensePolynomial::from_coefficients_vec(large.interpolate(&evals));
+
+        let (_, remainder) = domain.divide_by_vanishing_poly(&poly);
+        assert!(remainder.is_zero());
+    }
+}

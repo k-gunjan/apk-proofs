@@ -27,7 +27,13 @@ pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<b
 pub(crate) fn _random_bitmask<R: Rng, C: CurveGroup>(n: usize, rng: &mut R) -> Vec<C::ScalarField> {
     _random_bits(n, 2.0 / 3.0, rng)
         .into_iter()
-        .map(|b| if b { C::ScalarField::one() } else { C::ScalarField::zero() })
+        .map(|b| {
+            if b {
+                C::ScalarField::one()
+            } else {
+                C::ScalarField::zero()
+            }
+        })
         .collect()
 }
 
@@ -90,10 +96,11 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
     );
     end_timer!(t_prover_new);
 
-    let verifier =
-        VerifierOf::<C>::new(params.raw_vk(), pks_comm, Transcript::new(b"apk_proof"));
+    let verifier = VerifierOf::<C>::new(params.raw_vk(), pks_comm, Transcript::new(b"apk_proof"));
 
-    let bits = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect::<Vec<_>>();
+    let bits = (0..keyset_size)
+        .map(|_| rng.gen_bool(2.0 / 3.0))
+        .collect::<Vec<_>>();
     let b = Bitmask::from_bits(&bits);
 
     let prove_ = start_timer!(|| "prove");
@@ -101,7 +108,9 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
     end_timer!(prove_);
 
     let mut serialized_proof = vec![0; proof.compressed_size()];
-    proof.serialize_compressed(&mut serialized_proof[..]).unwrap();
+    proof
+        .serialize_compressed(&mut serialized_proof[..])
+        .unwrap();
     let deserialized_proof = ProofT::deserialize_compressed(&serialized_proof[..]).unwrap();
 
     assert_eq!(proof.compressed_size(), proof_size);
@@ -268,10 +277,8 @@ where
     // moves every challenge, and it also breaks the aggregate-key relation.
     let mut flipped = bits.clone();
     flipped[0] = !flipped[0];
-    let tampered = AccountablePublicInputOf::<C>::new(
-        &public_input.apk,
-        &Bitmask::from_bits(&flipped),
-    );
+    let tampered =
+        AccountablePublicInputOf::<C>::new(&public_input.apk, &Bitmask::from_bits(&flipped));
     assert!(
         !Apk::<C>::verify(&params, pks_comm.clone(), &tampered, &proof).unwrap(),
         "a proof must not verify against a different bitmask"
@@ -292,12 +299,11 @@ where
     // silently be working over different domains. The doubled size has to be a realisable one,
     // or `verify` would reject it as unconstructible before ever checking the proof.
     let mut wrong_domain_comm = pks_comm;
-    wrong_domain_comm.domain_size = <C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(
-        2 * (keyset_size + 1),
-    )
-    .expect("a larger domain must exist")
-    .base()
-    .size() as u64;
+    wrong_domain_comm.domain_size =
+        <C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(2 * (keyset_size + 1))
+            .expect("a larger domain must exist")
+            .base()
+            .size() as u64;
     assert!(
         !Apk::<C>::verify(&params, wrong_domain_comm, &public_input, &proof).unwrap(),
         "a proof must not verify against a verifier using a different domain"
@@ -322,11 +328,7 @@ where
     not_exact.domain_size = unrealisable;
     assert!(
         matches!(
-            VerifierOf::<C>::try_new(
-                params.raw_vk(),
-                not_exact,
-                Transcript::new(b"apk_proof")
-            ),
+            VerifierOf::<C>::try_new(params.raw_vk(), not_exact, Transcript::new(b"apk_proof")),
             Err(crate::DomainError::NotExact { .. })
         ),
         "a domain size the field cannot realise exactly must be rejected"
@@ -336,11 +338,7 @@ where
     too_large.domain_size = u64::MAX;
     assert!(
         matches!(
-            VerifierOf::<C>::try_new(
-                params.raw_vk(),
-                too_large,
-                Transcript::new(b"apk_proof")
-            ),
+            VerifierOf::<C>::try_new(params.raw_vk(), too_large, Transcript::new(b"apk_proof")),
             Err(crate::DomainError::TooLarge { .. })
         ),
         "an unrealisable domain size must be rejected"

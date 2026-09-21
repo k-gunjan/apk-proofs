@@ -5,17 +5,16 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
 use crate::domain::{DomainSet, FftDomain};
-use crate::{utils, Bitmask, Keyset, PublicInput};
 use crate::domains::Domains;
+use crate::{utils, Bitmask, Keyset, PublicInput};
 
 pub mod affine_addition;
-pub mod bitmask_packing;
 pub mod bit_counting;
+pub mod bitmask_packing;
 
 pub mod basic;
-pub mod packed;
 pub mod counting;
-
+pub mod packed;
 
 pub trait RegisterCommitments<G: AffineRepr>: CanonicalSerialize + CanonicalDeserialize {
     fn as_vec(&self) -> Vec<G>;
@@ -23,10 +22,7 @@ pub trait RegisterCommitments<G: AffineRepr>: CanonicalSerialize + CanonicalDese
 
 pub trait RegisterPolynomials<G: AffineRepr> {
     type C: RegisterCommitments<G>;
-    fn commit<Comm: Clone + Fn(&DensePolynomial<G::ScalarField>) -> G>(
-        &self, 
-        f: Comm
-    ) -> Self::C;
+    fn commit<Comm: Clone + Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: Comm) -> Self::C;
 }
 
 impl<G: AffineRepr> RegisterCommitments<G> for () {
@@ -109,14 +105,21 @@ where
     type E: RegisterEvaluations<OC::ScalarField>;
     type PI: PublicInput<IC>;
 
-    fn init(domains: Domains<OC::ScalarField, D>, bitmask: Bitmask, keyset: Keyset<IC, OC, D>) -> Self;
+    fn init(
+        domains: Domains<OC::ScalarField, D>,
+        bitmask: Bitmask,
+        keyset: Keyset<IC, OC, D>,
+    ) -> Self;
 
     // These 2 methods together return register polynomials the prover should commit to.
     // The 2nd one is used only in the "packed" scheme as it requires an additional challenge
     // (to aggregate the bitmask chunks) from the verifier,
     // that can be received only after the bitmask has been committed.
     fn get_register_polynomials_to_commit1(&self) -> Self::P1;
-    fn get_register_polynomials_to_commit2(&mut self, verifier_challenge: OC::ScalarField) -> Self::P2;
+    fn get_register_polynomials_to_commit2(
+        &mut self,
+        verifier_challenge: OC::ScalarField,
+    ) -> Self::P2;
 
     // This method returns register polynomials the prover should open. Those are the same polynomials
     // as the previous 2 methods together, and additionally 2 polynomials representing the keyset
@@ -126,7 +129,11 @@ where
     fn compute_constraint_polynomials(&self) -> Vec<DensePolynomial<OC::ScalarField>>;
 
     //TODO: remove domains param
-    fn compute_quotient_polynomial(&self, phi: OC::ScalarField, domain: &D::Domain) -> DensePolynomial<OC::ScalarField> {
+    fn compute_quotient_polynomial(
+        &self,
+        phi: OC::ScalarField,
+        domain: &D::Domain,
+    ) -> DensePolynomial<OC::ScalarField> {
         let w = utils::randomize(phi, &self.compute_constraint_polynomials());
         let (q_poly, r) = domain.divide_by_vanishing_poly(&w);
         assert_eq!(r, DensePolynomial::zero());
@@ -146,14 +153,18 @@ where
     // The verifier can restore the commitment to this "linearization" polynomial from the commitments to the register polynomials and their evaluations in zeta,
     // so the required communication (for any number of polynomials) is just the proof and the evaluation.
     // Plonk section "Reducing the number of field elements" describes the same for some more general case.
-    fn compute_linearization_polynomial(&self, phi: OC::ScalarField, zeta: OC::ScalarField) -> DensePolynomial<OC::ScalarField>;
+    fn compute_linearization_polynomial(
+        &self,
+        phi: OC::ScalarField,
+        zeta: OC::ScalarField,
+    ) -> DensePolynomial<OC::ScalarField>;
 }
 
 pub trait RegisterEvaluations<F: Field>: CanonicalSerialize + CanonicalDeserialize {
     fn as_vec(&self) -> Vec<F>;
 }
 
-pub trait VerifierProtocol<IC, OC, S> 
+pub trait VerifierProtocol<IC, OC, S>
 where
     IC: CurveGroup,
     OC: CurveGroup,

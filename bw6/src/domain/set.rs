@@ -11,8 +11,9 @@
 
 use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
+use core::marker::PhantomData;
 
-use super::cooley_tukey::{estimated_transform_cost, CooleyTukeyDomain};
+use super::cooley_tukey::CooleyTukeyDomain;
 use super::naive::subgroup_generator;
 use super::radix2::Radix2Domain;
 use super::types::{DomainError, FftDomain, SupportsPackedScheme};
@@ -52,7 +53,10 @@ pub trait DomainSet<F: PrimeField>: Clone + Sized {
         let set = Self::for_min_size(size)?;
         let realised = set.base().size();
         if realised != size {
-            return Err(DomainError::NotExact { requested: size, nearest: realised });
+            return Err(DomainError::NotExact {
+                requested: size,
+                nearest: realised,
+            });
         }
         Ok(set)
     }
@@ -125,12 +129,12 @@ impl<F: PrimeField> DomainSet<F> for Radix2DomainSet<F> {
     type Domain = Radix2Domain<F>;
 
     fn for_min_size(min_size: usize) -> Result<Self, DomainError> {
-        let base = build_radix2(min_size)?;
+        let base = Radix2Domain::try_new(min_size)?;
         let n = base.size();
         Ok(Radix2DomainSet {
             base,
-            medium: build_radix2(2 * n)?,
-            large: build_radix2(4 * n)?,
+            medium: Radix2Domain::try_new(2 * n)?,
+            large: Radix2Domain::try_new(4 * n)?,
         })
     }
 
@@ -147,9 +151,12 @@ impl<F: PrimeField> DomainSet<F> for Radix2DomainSet<F> {
     }
 
     fn base_for_exact_size(size: usize) -> Result<Radix2Domain<F>, DomainError> {
-        let base = build_radix2::<F>(size)?;
+        let base = Radix2Domain::<F>::try_new(size)?;
         if base.size() != size {
-            return Err(DomainError::NotExact { requested: size, nearest: base.size() });
+            return Err(DomainError::NotExact {
+                requested: size,
+                nearest: base.size(),
+            });
         }
         Ok(base)
     }
@@ -164,11 +171,6 @@ impl<F: PrimeField> DomainSet<F> for Radix2DomainSet<F> {
     }
 }
 
-fn build_radix2<F: PrimeField>(size: usize) -> Result<Radix2Domain<F>, DomainError> {
-    use super::types::DomainFactory;
-    Radix2Domain::try_create_domain(size)
-}
-
 /// Radix-2 sizes from 256 up are all multiples of 256, which is what `packed` needs.
 impl<F: PrimeField> SupportsPackedScheme for Radix2DomainSet<F> {}
 
@@ -176,151 +178,95 @@ impl<F: PrimeField> SupportsPackedScheme for Radix2DomainSet<F> {}
 // APK-381
 // -------------------------------------------------------------------------------------------
 
-/// The base domain sizes available to APK-381, ascending.
+/// A precomputed, ascending list of base domain sizes for one field.
 ///
-/// BW6-767's scalar field has `q - 1 = 2 * 3^2 * 11 * 23 * 47 * 10177 * (unusable large part)`.
-/// Two of those factors are **reserved** rather than spent on the base domain: one 2 and one 3,
-/// so that `6n` divides `q - 1` whenever `n` does. That fixes the triple as `n, 2n, 6n` —
-/// `2n >= 2n - 1` and `6n >= 4n - 2`, both nested inside each other — and leaves the base sizes
-/// as exactly the 32 divisors of
-///
-/// ```text
-/// 3 * 11 * 23 * 47 * 10177 = 363,044,121
-/// ```
-///
-/// listed here from the smallest to the largest the field admits. The largest entry's `6n` is
-/// `2 * 3^2 * 11 * 23 * 47 * 10177`, the entire usable smooth part of `q - 1`, so the table
-/// cannot be extended.
-///
-/// The price of reserving those factors is padding: the gaps are wide, and the worst case in the
-/// range that matters is `n = 3244` rounding up to 10177, a factor of 3.14. Spending the 2 and
-/// the 3 on the base domain would close the gaps, but then `2n` and `6n` would not exist and the
-/// three domains would have to be chosen independently and would not nest.
-///
-/// Validator-set sizes of interest sit comfortably inside: Kusama's ~1000 lands on 1081 = 23*47
-/// and Polkadot's ~1500 on 1551 = 3*11*47.
-///
-/// Only the first fourteen entries are Rader-free. From 10177 on, the prime 10177 appears and
-/// its transform goes through Rader's algorithm at roughly four times the per-point cost; the
-/// selector in [`SmoothDomainSet::for_min_size`] prefers a larger smooth size over a smaller
-/// Rader one when that is cheaper, which is why asking for 5000 yields 11891 = 11*23*47 rather
-/// than 10177.
-pub const APK381_DOMAIN_SIZES: &[usize] = &[
-    1,          // 1
-    3,          // 3
-    11,         // 11
-    23,         // 23
-    33,         // 3 * 11
-    47,         // 47
-    69,         // 3 * 23
-    141,        // 3 * 47
-    253,        // 11 * 23
-    517,        // 11 * 47
-    759,        // 3 * 11 * 23
-    1081,       // 23 * 47          <- Kusama, ~1000 validators
-    1551,       // 3 * 11 * 47      <- Polkadot, ~1500 validators
-    3243,       // 3 * 23 * 47
-    10177,      // 10177            <- Rader from here on
-    11891,      // 11 * 23 * 47
-    30531,      // 3 * 10177
-    35673,      // 3 * 11 * 23 * 47
-    111947,     // 11 * 10177
-    234071,     // 23 * 10177
-    335841,     // 3 * 11 * 10177
-    478319,     // 47 * 10177
-    702213,     // 3 * 23 * 10177
-    1434957,    // 3 * 47 * 10177
-    2574781,    // 11 * 23 * 10177
-    5261509,    // 11 * 47 * 10177
-    7724343,    // 3 * 11 * 23 * 10177
-    11001337,   // 23 * 47 * 10177
-    15784527,   // 3 * 11 * 47 * 10177
-    33004011,   // 3 * 23 * 47 * 10177
-    121014707,  // 11 * 23 * 47 * 10177
-    363044121,  // 3 * 11 * 23 * 47 * 10177
-];
+/// The list is a property of the field's multiplicative order, worked out once and written down,
+/// so that choosing a domain is just a binary search. A list worked out for one field cannot be 
+/// handed to a `SmoothDomainSet` over another. That the entries really are subgroup orders of `F` 
+/// is not something the type system can check, so it is asserted where the list is written 
+/// down - see the tests in [`crate::instances::bls12_381_bw6_767`] — and re-checked by 
+/// `debug_assert` wherever a domain is built from one.
+pub trait DomainSizes<F: PrimeField>: 'static {
+    /// Base domain sizes, strictly ascending. Each `n` must satisfy `6n | q - 1`, since
+    /// [`SmoothDomainSet`] expands it to the triple `n, 2n, 6n`.
+    const SIZES: &'static [usize];
+}
 
-/// Mixed-radix domains `n, 2n, 6n` drawn from [`APK381_DOMAIN_SIZES`]. Used by APK-381.
-#[derive(Clone, Debug)]
-pub struct SmoothDomainSet<F: PrimeField> {
+/// Mixed-radix domains `n, 2n, 6n` drawn from `S`. Used by APK-381.
+pub struct SmoothDomainSet<F: PrimeField, S: DomainSizes<F>> {
     base: CooleyTukeyDomain<F>,
     medium: CooleyTukeyDomain<F>,
     large: CooleyTukeyDomain<F>,
+    _sizes: PhantomData<fn() -> S>,
 }
 
-impl<F: PrimeField> SmoothDomainSet<F> {
-    /// The table entries this field can actually realise, ascending.
-    ///
-    /// The table is written for BW6-767's scalar field, but nothing stops another field from
-    /// being asked for a `SmoothDomainSet`, so membership is checked against `q - 1` rather than
-    /// assumed. An entry survives only if `6n` divides `q - 1`, which is what makes the whole
-    /// triple constructible.
-    fn realisable_sizes() -> Vec<usize> {
-        APK381_DOMAIN_SIZES
-            .iter()
-            .copied()
-            .filter(|&n| subgroup_generator::<F>(6 * n).is_some())
-            .collect()
+// Hand-written rather than derived: `S` is a marker that is never held by value, so deriving
+// would saddle every user of the type with spurious `S: Clone` / `S: Debug` bounds.
+impl<F: PrimeField, S: DomainSizes<F>> Clone for SmoothDomainSet<F, S> {
+    fn clone(&self) -> Self {
+        SmoothDomainSet {
+            base: self.base.clone(),
+            medium: self.medium.clone(),
+            large: self.large.clone(),
+            _sizes: PhantomData,
+        }
     }
+}
 
-    /// Estimated prover cost of the triple, in field multiplications.
-    ///
-    /// Weighted by how often the prover transforms over each domain: three times over the base,
-    /// twice over the medium one and twelve times over the large one. `large` dominates, so this
-    /// is effectively ranking by the cost of the `6n` transform.
-    fn estimated_cost(n: usize) -> u128 {
-        3 * estimated_transform_cost(n)
-            + 2 * estimated_transform_cost(2 * n)
-            + 12 * estimated_transform_cost(6 * n)
+impl<F: PrimeField, S: DomainSizes<F>> core::fmt::Debug for SmoothDomainSet<F, S> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("SmoothDomainSet")
+            .field("base", &self.base.size())
+            .field("medium", &self.medium.size())
+            .field("large", &self.large.size())
+            .finish()
     }
+}
 
-    /// The table entry a request for `min_size` resolves to.
+impl<F: PrimeField, S: DomainSizes<F>> SmoothDomainSet<F, S> {
+    /// The table entry a request for `min_size` resolves to: simply the first one big enough.
     ///
-    /// The smallest entry at least `min_size`, unless a larger one transforms dramatically
-    /// faster. Transform cost is not monotone in size here: 10177 is prime and needs Rader,
-    /// while the larger 11891 = 11 * 23 * 47 is fully smooth and about three times cheaper.
-    /// Minimising cost alone would be wrong in the other direction, though — the FFTs are not
-    /// the prover's only work, and the commitments are multi-scalar multiplications linear in
-    /// `n` — so a smaller entry is passed over only when something larger is *much* cheaper.
+    /// A plain binary search is cost-optimal only because the list is already filtered — whoever
+    /// writes one down omits any size that a larger entry beats outright, which is what makes
+    /// transform cost increase with size. It is also why nothing here consults the field: the
+    /// list is taken as given, and `build` is where a size that this field cannot realise turns
+    /// into an error.
     ///
     /// Sole source of truth for which size a request maps to, so the prover's triple and the
     /// verifier's single domain cannot drift apart.
     fn select_size(min_size: usize) -> Result<usize, DomainError> {
-        /// How much cheaper a larger triple must be before the extra linear work pays off.
-        const WORTH_GROWING_FOR: u128 = 2;
-
-        let sizes = Self::realisable_sizes();
-        let first = sizes.partition_point(|&n| n < min_size);
-        let smallest = *sizes.get(first).ok_or(DomainError::TooLarge { requested: min_size })?;
-
-        // A cheaper option is always nearby: cost grows roughly as `n * sum(prime factors)`, and
-        // this window is wider than the largest gap in the table.
-        let ceiling = smallest.saturating_mul(4);
-        let window = sizes[first..].iter().copied().take_while(|&n| n <= ceiling);
-
-        let costed: Vec<(usize, u128)> = window.map(|n| (n, Self::estimated_cost(n))).collect();
-        let best = costed.iter().map(|&(_, c)| c).min().unwrap_or(u128::MAX);
-        Ok(costed
-            .iter()
-            .find(|&&(_, c)| c <= best.saturating_mul(WORTH_GROWING_FOR))
-            .map(|&(n, _)| n)
-            .unwrap_or(smallest))
+        let first = S::SIZES.partition_point(|&n| n < min_size);
+        S::SIZES.get(first).copied().ok_or(DomainError::TooLarge {
+            requested: min_size,
+        })
     }
 
     fn build(n: usize) -> Result<Self, DomainError> {
+        // The `DomainSizes` contract, checked where it is relied on but kept off the hot path:
+        // a list paired with the wrong field, or one entry mistyped, shows up here in every
+        // debug and test build rather than as a confusing `TooLarge` at run time.
+        debug_assert!(
+            subgroup_generator::<F>(6 * n).is_some(),
+            "{} is in the size list but 6 * {} does not divide this field's q - 1",
+            n,
+            n
+        );
+
         let missing = || DomainError::TooLarge { requested: n };
         Ok(SmoothDomainSet {
             base: CooleyTukeyDomain::new(n).ok_or_else(missing)?,
             medium: CooleyTukeyDomain::new(2 * n).ok_or_else(missing)?,
             large: CooleyTukeyDomain::new(6 * n).ok_or_else(missing)?,
+            _sizes: PhantomData,
         })
     }
 }
 
-impl<F: PrimeField> DomainSet<F> for SmoothDomainSet<F> {
+impl<F: PrimeField, S: DomainSizes<F>> DomainSet<F> for SmoothDomainSet<F, S> {
     type Domain = CooleyTukeyDomain<F>;
 
-    /// See [`SmoothDomainSet::select_size`] for which table entry a request resolves to.
+    /// The first entry of `S` at least `min_size`. Which entries exist, and which were left
+    /// out for being dominated, is the size list's business.
     fn for_min_size(min_size: usize) -> Result<Self, DomainError> {
         Self::build(Self::select_size(min_size)?)
     }
@@ -328,7 +274,10 @@ impl<F: PrimeField> DomainSet<F> for SmoothDomainSet<F> {
     fn base_for_exact_size(size: usize) -> Result<CooleyTukeyDomain<F>, DomainError> {
         let selected = Self::select_size(size)?;
         if selected != size {
-            return Err(DomainError::NotExact { requested: size, nearest: selected });
+            return Err(DomainError::NotExact {
+                requested: size,
+                nearest: selected,
+            });
         }
         CooleyTukeyDomain::new(size).ok_or(DomainError::TooLarge { requested: size })
     }
@@ -369,47 +318,14 @@ mod tests {
     use ark_bw6_767::Fr as Fr767;
     use ark_poly::DenseUVPolynomial;
     use ark_std::test_rng;
-    use num_bigint::BigUint;
 
-    type Smooth = SmoothDomainSet<Fr767>;
+    // The mechanism is generic, but exercising it needs a concrete size list, so these tests
+    // borrow APK-381's. Whether that list is *correct* for BW6-767 is asserted next to the list
+    // itself, in `instances::bls12_381_bw6_767`.
+    use crate::instances::bls12_381_bw6_767::APK381_DOMAIN_SIZES;
+
+    type Smooth = crate::instances::bls12_381_bw6_767::Domains767;
     type Radix2 = Radix2DomainSet<Fr761>;
-
-    /// The table is the reserved-factor rule made explicit: every entry divides
-    /// `3 * 11 * 23 * 47 * 10177`, and every divisor of it is an entry.
-    #[test]
-    fn table_is_exactly_the_divisors_of_the_unreserved_part() {
-        let unreserved: usize = 3 * 11 * 23 * 47 * 10177;
-        let mut expected: Vec<usize> = vec![1];
-        for f in [3usize, 11, 23, 47, 10177] {
-            expected = expected.iter().flat_map(|&d| [d, d * f]).collect();
-        }
-        expected.sort_unstable();
-        expected.dedup();
-
-        assert_eq!(APK381_DOMAIN_SIZES, &expected[..]);
-        assert!(APK381_DOMAIN_SIZES.iter().all(|&n| unreserved % n == 0));
-        assert_eq!(*APK381_DOMAIN_SIZES.last().unwrap(), unreserved);
-    }
-
-    /// The reason the 2 and the 3 are held back: `6n` has to exist for every entry, and it has
-    /// to be the whole usable smooth part of `q - 1` at the top of the table.
-    #[test]
-    fn every_entry_admits_its_doubled_and_sextupled_domain() {
-        let order: BigUint = Into::<BigUint>::into(<Fr767 as ark_ff::PrimeField>::MODULUS) - 1u8;
-        for &n in APK381_DOMAIN_SIZES {
-            assert!(
-                (&order % BigUint::from(6 * n)) == BigUint::from(0u32),
-                "6 * {} does not divide q - 1",
-                n
-            );
-        }
-        assert_eq!(
-            6 * APK381_DOMAIN_SIZES.last().unwrap(),
-            2 * 9 * 11 * 23 * 47 * 10177,
-            "the largest triple should exhaust the smooth part of q - 1"
-        );
-        assert_eq!(Smooth::realisable_sizes().len(), APK381_DOMAIN_SIZES.len());
-    }
 
     /// What the PIOP actually requires of the triple, for every entry the field admits.
     #[test]
@@ -436,12 +352,13 @@ mod tests {
         }
     }
 
-    /// ...except where the first entry needs Rader and a larger smooth one is much cheaper.
+    /// ...and because the dominated sizes are simply not in the table, that plain binary search
+    /// never returns one. 5000 validators would otherwise land on 10177, which is prime and has
+    /// to go through Rader.
     #[test]
-    fn for_min_size_skips_a_smaller_but_slower_entry() {
-        assert!(Smooth::estimated_cost(11891) < Smooth::estimated_cost(10177));
-        let set = Smooth::for_min_size(5000).unwrap();
-        assert_eq!(set.base().size(), 11891, "10177 is prime and needs Rader");
+    fn a_request_is_never_served_by_a_dominated_size() {
+        assert_eq!(Smooth::for_min_size(5000).unwrap().base().size(), 11891);
+        assert_eq!(Smooth::for_min_size(20000).unwrap().base().size(), 35673);
     }
 
     /// Sizes of interest land where the table says they do.
@@ -467,7 +384,10 @@ mod tests {
         assert_eq!(Smooth::for_exact_size(253).unwrap().base().size(), 253);
         assert_eq!(
             Smooth::for_exact_size(254).unwrap_err(),
-            DomainError::NotExact { requested: 254, nearest: 517 }
+            DomainError::NotExact {
+                requested: 254,
+                nearest: 517
+            }
         );
     }
 
@@ -502,9 +422,7 @@ mod tests {
 
     fn random_poly<F: ark_ff::PrimeField>(degree_bound: usize) -> DensePolynomial<F> {
         let rng = &mut test_rng();
-        DensePolynomial::from_coefficients_vec(
-            (0..degree_bound).map(|_| F::rand(rng)).collect(),
-        )
+        DensePolynomial::from_coefficients_vec((0..degree_bound).map(|_| F::rand(rng)).collect())
     }
 
     /// The rotation overrides must agree with the trait's always-correct default. This is the
@@ -544,6 +462,26 @@ mod tests {
         check(&Radix2::for_min_size(16).unwrap());
         check(&Smooth::for_min_size(23).unwrap());
         check(&Smooth::for_min_size(33).unwrap());
+    }
+
+    /// A size list paired with a field that cannot realise it is a programming error, and the
+    /// `debug_assert` in `build` is what turns it into a loud one. Without that net, dropping
+    /// the old runtime filter would have made such a mistake surface as a puzzling `TooLarge`.
+    ///
+    /// Debug-only, because that is exactly the point: the check costs a modular exponentiation
+    /// and must not run in a release prover or verifier.
+    #[test]
+    #[cfg(debug_assertions)]
+    #[should_panic(expected = "does not divide this field's q - 1")]
+    fn a_size_list_that_the_field_cannot_realise_trips_the_debug_assert() {
+        struct WrongForThisField;
+        impl DomainSizes<Fr767> for WrongForThisField {
+            // A power of two. BW6-767's scalar field has two-adicity 1, so no such subgroup
+            // exists there; this list belongs to a radix-2 field.
+            const SIZES: &'static [usize] = &[256];
+        }
+
+        let _ = SmoothDomainSet::<Fr767, WrongForThisField>::for_min_size(200);
     }
 
     /// APK-377 is unchanged: powers of two, and the classical `n, 2n, 4n` layout.

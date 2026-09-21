@@ -1,16 +1,19 @@
 use ark_ec::CurveGroup;
-use ark_ff::{Field, PrimeField};
+use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
-use w3f_pcs::pcs::{Commitment, RawVerifierKey};
 use merlin::Transcript;
+use w3f_pcs::pcs::{Commitment, RawVerifierKey};
 
 use crate::domain::FftDomain;
-use crate::{KeysetCommitment, PublicInput};
 use crate::piop::{RegisterCommitments, RegisterEvaluations};
+use crate::{KeysetCommitment, PublicInput};
 
 pub(crate) trait ApkTranscript<F: PrimeField> {
-
-    fn set_protocol_params<D: FftDomain<F>, VK: RawVerifierKey>(&mut self, domain: &D, kzg_vk: &VK) {
+    fn set_protocol_params<D: FftDomain<F>, VK: RawVerifierKey>(
+        &mut self,
+        domain: &D,
+        kzg_vk: &VK,
+    ) {
         // Bind the domain by size and generator rather than by serialising a concrete domain
         // type. Sizes are not powers of two on BW6-767, and prover and verifier disagreeing
         // about which domain a proof is over must be a verification failure, not silent.
@@ -19,8 +22,8 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
         self._append_serializable(b"vk", kzg_vk);
     }
 
-    fn set_keyset_commitment<C>(&mut self, keyset_commitment: &KeysetCommitment<F, C>) 
-    where 
+    fn set_keyset_commitment<C>(&mut self, keyset_commitment: &KeysetCommitment<F, C>)
+    where
         C: Commitment<F>,
     {
         self._append_serializable(b"keyset_commitment", keyset_commitment);
@@ -30,7 +33,10 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
         self._append_serializable(b"public_input", public_input);
     }
 
-    fn append_register_commitments<G: ark_ec::AffineRepr>(&mut self, register_commitments: &impl RegisterCommitments<G>) {
+    fn append_register_commitments<G: ark_ec::AffineRepr>(
+        &mut self,
+        register_commitments: &impl RegisterCommitments<G>,
+    ) {
         self._append_serializable(b"register_commitments", register_commitments);
     }
 
@@ -38,7 +44,10 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
         self._get_128_bit_challenge(b"bitmask_aggregation")
     }
 
-    fn append_2nd_round_register_commitments<G: ark_ec::AffineRepr>(&mut self, register_commitments: &impl RegisterCommitments<G>) {
+    fn append_2nd_round_register_commitments<G: ark_ec::AffineRepr>(
+        &mut self,
+        register_commitments: &impl RegisterCommitments<G>,
+    ) {
         self._append_serializable(b"2nd_round_register_commitments", register_commitments);
     }
 
@@ -54,7 +63,12 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
         self._get_128_bit_challenge(b"evaluation_point")
     }
 
-    fn append_evaluations(&mut self, evals: &impl RegisterEvaluations<F>, q_at_zeta: &F, r_at_zeta_omega: &F) {
+    fn append_evaluations(
+        &mut self,
+        evals: &impl RegisterEvaluations<F>,
+        q_at_zeta: &F,
+        r_at_zeta_omega: &F,
+    ) {
         self._append_serializable(b"register_evaluations", evals);
         self._append_serializable(b"quotient_evaluation", q_at_zeta);
         self._append_serializable(b"shifted_linearization_evaluation", r_at_zeta_omega);
@@ -72,7 +86,6 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
 }
 
 impl<F: PrimeField> ApkTranscript<F> for Transcript {
-
     fn _get_128_bit_challenge(&mut self, label: &'static [u8]) -> F {
         let mut buf = [0u8; 16];
         self.challenge_bytes(label, &mut buf);
@@ -80,7 +93,9 @@ impl<F: PrimeField> ApkTranscript<F> for Transcript {
     }
 
     fn _get_128_bit_challenges(&mut self, label: &'static [u8], n: usize) -> Vec<F> {
-        (0..n).map(|_| <Self as ApkTranscript<F>>::_get_128_bit_challenge(self, label)).collect() //TODO: unlikely secure
+        (0..n)
+            .map(|_| <Self as ApkTranscript<F>>::_get_128_bit_challenge(self, label))
+            .collect() //TODO: unlikely secure
     }
 
     fn _append_serializable(&mut self, label: &'static [u8], message: &impl CanonicalSerialize) {

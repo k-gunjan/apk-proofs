@@ -2,7 +2,7 @@ use ark_ff::PrimeField;
 use num_bigint::BigUint;
 
 use super::naive::subgroup_generator;
-use super::types::{DomainError, DomainFactory, FftDomain};
+use super::types::FftDomain;
 
 /// Prime factors small enough that a direct O(p^2) DFT beats reducing them further.
 ///
@@ -13,19 +13,6 @@ use super::types::{DomainError, DomainFactory, FftDomain};
 /// the direct DFT, so direct wins. Rader only pays off for the large factor 10177, where direct
 /// would be 103.5M against roughly 3.9M.
 const MAX_DIRECT_RADIX: usize = 64;
-
-/// The largest prime factor a *domain* may have. Anything above `MAX_DIRECT_RADIX` and up to
-/// this goes through Rader. Convolution domains are held to `MAX_DIRECT_RADIX` so a Rader
-/// reduction can never recurse into another one.
-const MAX_RADER_PRIME: usize = 1 << 16;
-
-/// Multiplications per point for a transform over a Rader convolution domain.
-///
-/// Those domains are smooth by construction. Calibrated against the one that matters:
-/// 23782 = 2 * 11 * 23 * 47, the convolution domain for p = 10177, costs about 1.8M
-/// multiplications by the model below, i.e. roughly 77 per point. Only used for ranking
-/// candidate domain sizes, so the constant needs to be representative, not exact.
-const RADER_CONV_COST_PER_POINT: u128 = 77;
 
 /// A transform plan: a tree of Cooley-Tukey splits with direct DFTs at the leaves.
 ///
@@ -170,12 +157,24 @@ impl<F: PrimeField> Plan<F> {
                 let mut out = Vec::with_capacity(*n);
                 let mut point = F::one();
                 for _ in 0..*n {
-                    out.push(coeffs.iter().rev().fold(F::zero(), |acc, &c| acc * point + c));
+                    out.push(
+                        coeffs
+                            .iter()
+                            .rev()
+                            .fold(F::zero(), |acc, &c| acc * point + c),
+                    );
                     point *= *w;
                 }
                 out
             }
-            Plan::Split { n, n1, n2, inner, outer, twiddles } => {
+            Plan::Split {
+                n,
+                n1,
+                n2,
+                inner,
+                outer,
+                twiddles,
+            } => {
                 let mut padded;
                 let coeffs = if coeffs.len() < *n {
                     padded = coeffs.to_vec();
@@ -206,7 +205,13 @@ impl<F: PrimeField> Plan<F> {
                 }
                 result
             }
-            Plan::Rader { p, perm, b_hat, conv, conv_inv } => {
+            Plan::Rader {
+                p,
+                perm,
+                b_hat,
+                conv,
+                conv_inv,
+            } => {
                 let mut padded;
                 let coeffs = if coeffs.len() < *p {
                     padded = coeffs.to_vec();
@@ -229,8 +234,11 @@ impl<F: PrimeField> Plan<F> {
                 debug_assert_eq!(a.len(), m);
 
                 let a_hat = conv.eval(&a);
-                let product: Vec<F> =
-                    a_hat.into_iter().zip(b_hat.iter()).map(|(a, b)| a * b).collect();
+                let product: Vec<F> = a_hat
+                    .into_iter()
+                    .zip(b_hat.iter())
+                    .map(|(a, b)| a * b)
+                    .collect();
                 let c = conv_inv.eval(&product);
 
                 let mut result = vec![F::zero(); *p];
@@ -329,13 +337,6 @@ impl<F: PrimeField> CooleyTukeyDomain<F> {
     }
 }
 
-/// An upper bound on the domain sizes worth enumerating.
-///
-/// Only needed to keep the search finite for 2-adic fields, where the smooth part of `q - 1` is
-/// astronomically large: BW6-761's contains 2^46 on its own. It is far above any size the
-/// prover could afford to transform.
-const MAX_ADMISSIBLE_SIZE: usize = 1 << 32;
-
 /// The prime powers `p^e || q - 1` for primes small enough to transform directly.
 ///
 /// Trial division by every integer up to the radix bound is correct without a primality test,
@@ -357,17 +358,11 @@ fn usable_prime_powers<F: PrimeField>(max_prime: usize) -> Vec<(usize, u32)> {
     powers
 }
 
-/// Every domain size this backend can build, ascending.
+/// The subgroup orders below `max` whose prime factors are all at most `max_prime`, ascending.
 ///
-/// These are the divisors of the usable smooth part of `q - 1`. For BW6-767's scalar field that
-/// is `2 * 3^2 * 11 * 23 * 47 = 214038`, so 48 sizes — the sparseness is a property of the
-/// field, not of this code, and is why a caller asking for `n` can be handed noticeably more.
-pub fn admissible_sizes<F: PrimeField>(max: usize) -> Vec<usize> {
-    admissible_sizes_bounded::<F>(MAX_RADER_PRIME, max)
-}
-
+/// Only Rader needs this now, to find a convolution domain: which sizes a *domain* may take is
+/// no longer discovered by enumeration but read off [`crate::APK381_DOMAIN_SIZES`].
 fn admissible_sizes_bounded<F: PrimeField>(max_prime: usize, max: usize) -> Vec<usize> {
-    let max = max.min(MAX_ADMISSIBLE_SIZE);
     let mut sizes = vec![1usize];
     for (p, e) in usable_prime_powers::<F>(max_prime) {
         let mut next = Vec::new();
@@ -388,84 +383,6 @@ fn admissible_sizes_bounded<F: PrimeField>(max_prime: usize, max: usize) -> Vec<
     sizes
 }
 
-/// Estimated multiplications for one transform over a domain of `size`, mirroring how
-/// `Plan::build` decomposes it.
-///
-/// Used to choose between candidate sizes, so only relative values matter.
-pub fn estimated_transform_cost(size: usize) -> u128 {
-    fn cost(n: usize, factors: &[usize]) -> u128 {
-        if n <= 1 {
-            return 0;
-        }
-        if n <= MAX_DIRECT_RADIX {
-            return ((n - 1) as u128).pow(2);
-        }
-        if factors.len() <= 1 {
-            // Rader: two transforms over a smooth convolution domain of at least 2p-3, plus the
-            // pointwise product. Estimated in closed form rather than by recursion — the
-            // convolution domain is chosen at build time and does not contain p, so recursing on
-            // `2p` here would just come back to this branch.
-            let m = 2 * n as u128;
-            return 2 * m * RADER_CONV_COST_PER_POINT + 3 * m;
-        }
-        let p = factors[0];
-        let rest = n / p;
-        // One stage of radix p over n points, plus the sub-transforms and the twiddles.
-        p as u128 * cost(rest, &factors[1..]) + rest as u128 * ((p - 1) as u128).pow(2) + n as u128
-    }
-    cost(size, &prime_factors(size))
-}
-
-impl<F: PrimeField> CooleyTukeyDomain<F> {
-    /// The smallest constructible domain of at least `min_size`, unless a larger one transforms
-    /// dramatically faster.
-    ///
-    /// Transform cost is not monotone in domain size, so taking the smallest admissible size is
-    /// not always right: 10177 is prime and needs Rader, costing roughly four times what the
-    /// larger but fully smooth 11891 does.
-    ///
-    /// Minimising transform cost alone is not right either. The FFTs are not the prover's only
-    /// work — the commitments are multi-scalar multiplications that scale linearly in `n` — so
-    /// trading a 47% larger domain for a 9% cheaper transform, as picking 1518 over 1034 would,
-    /// loses overall. Instead a candidate is skipped only when something larger is *much*
-    /// cheaper, which separates the 4x case from the noise.
-    ///
-    /// Returns `None` when the field offers no size at all above `min_size`.
-    pub fn smallest_at_least(min_size: usize) -> Option<Self> {
-        /// How much cheaper a larger domain must be before it is worth the extra linear work.
-        const WORTH_GROWING_FOR: u128 = 2;
-
-        // Cost grows roughly as `n * sum(prime factors)`, so a cheaper option is always close
-        // by; this window is far wider than the largest gap between admissible sizes.
-        let ceiling = min_size.saturating_mul(8).max(1024);
-        let candidates: Vec<usize> = admissible_sizes::<F>(ceiling)
-            .into_iter()
-            .filter(|&n| n >= min_size)
-            .collect();
-
-        if let Some(best) = candidates.iter().map(|&n| estimated_transform_cost(n)).min() {
-            if let Some(&n) = candidates
-                .iter()
-                .find(|&&n| estimated_transform_cost(n) <= best * WORTH_GROWING_FOR)
-            {
-                return Self::new(n);
-            }
-        }
-
-        // Nothing in the window: fall back to the smallest available anywhere.
-        admissible_sizes::<F>(MAX_ADMISSIBLE_SIZE)
-            .into_iter()
-            .find(|&n| n >= min_size)
-            .and_then(Self::new)
-    }
-}
-
-impl<F: PrimeField> DomainFactory<F> for CooleyTukeyDomain<F> {
-    fn try_create_domain(size: usize) -> Result<Self, DomainError> {
-        Self::smallest_at_least(size).ok_or(DomainError::TooLarge { requested: size })
-    }
-}
-
 impl<F: PrimeField> FftDomain<F> for CooleyTukeyDomain<F> {
     fn size(&self) -> usize {
         self.size
@@ -484,12 +401,19 @@ impl<F: PrimeField> FftDomain<F> for CooleyTukeyDomain<F> {
     }
 
     fn fft(&self, coeffs: &[F]) -> Vec<F> {
-        assert!(coeffs.len() <= self.size, "more coefficients than domain points");
+        assert!(
+            coeffs.len() <= self.size,
+            "more coefficients than domain points"
+        );
         self.fwd.eval(coeffs)
     }
 
     fn interpolate(&self, evals: &[F]) -> Vec<F> {
-        assert_eq!(evals.len(), self.size, "interpolation needs exactly `size` evaluations");
+        assert_eq!(
+            evals.len(),
+            self.size,
+            "interpolation needs exactly `size` evaluations"
+        );
         let mut coeffs = self.inv.eval(evals);
         coeffs.iter_mut().for_each(|c| *c *= self.size_inv);
         coeffs
@@ -520,18 +444,30 @@ mod tests {
     fn agrees_with_naive_dft() {
         let rng = &mut test_rng();
         for n in [253usize, 414, 1081, 1551, 2277] {
-            let ct = CooleyTukeyDomain::<Fr767>::new(n).unwrap_or_else(|| panic!("no domain of size {}", n));
+            let ct = CooleyTukeyDomain::<Fr767>::new(n)
+                .unwrap_or_else(|| panic!("no domain of size {}", n));
             let naive = NaiveDomain::<Fr767>::new(n).unwrap();
-            assert_eq!(ct.generator(), naive.generator(), "generators differ at n = {}", n);
+            assert_eq!(
+                ct.generator(),
+                naive.generator(),
+                "generators differ at n = {}",
+                n
+            );
 
             let coeffs: Vec<Fr767> = (0..n).map(|_| Fr767::rand(rng)).collect();
-            assert_eq!(ct.fft(&coeffs), naive.fft(&coeffs), "fft differs at n = {}", n);
+            assert_eq!(
+                ct.fft(&coeffs),
+                naive.fft(&coeffs),
+                "fft differs at n = {}",
+                n
+            );
 
             let evals: Vec<Fr767> = (0..n).map(|_| Fr767::rand(rng)).collect();
             assert_eq!(
                 ct.interpolate(&evals),
                 naive.interpolate(&evals),
-                "interpolate differs at n = {}", n
+                "interpolate differs at n = {}",
+                n
             );
         }
     }
@@ -557,7 +493,12 @@ mod tests {
         for n in [1551usize, 2277, 9306] {
             let domain = CooleyTukeyDomain::<Fr767>::new(n).unwrap();
             let evals: Vec<Fr767> = (0..n).map(|_| Fr767::rand(rng)).collect();
-            assert_eq!(domain.fft(&domain.interpolate(&evals)), evals, "roundtrip failed at n = {}", n);
+            assert_eq!(
+                domain.fft(&domain.interpolate(&evals)),
+                evals,
+                "roundtrip failed at n = {}",
+                n
+            );
         }
     }
 
@@ -572,30 +513,6 @@ mod tests {
         let evals: Vec<Fr767> = (0..253).map(|_| Fr767::rand(rng)).collect();
         let coeffs = small.interpolate(&evals);
         assert_eq!(large.fft(&coeffs), naive_large.fft(&coeffs));
-    }
-
-    /// Transform cost is not monotone in size, so blindly selecting the smallest admissible
-    /// domain is wrong: 10177 is prime and needs Rader, while the larger 11891 = 11 * 23 * 47
-    /// is around four times cheaper. But minimising cost alone is also wrong, because the
-    /// commitments scale linearly in n — hence the "much cheaper" threshold.
-    #[test]
-    fn selects_the_cheapest_domain_not_the_smallest() {
-        assert!(
-            estimated_transform_cost(11891) < estimated_transform_cost(10177),
-            "the premise of this test is that the larger domain is cheaper"
-        );
-
-        let picked = CooleyTukeyDomain::<Fr767>::smallest_at_least(10100).unwrap();
-        assert_eq!(picked.size(), 11891, "should skip the smaller but slower 10177");
-
-        let picked = CooleyTukeyDomain::<Fr767>::smallest_at_least(30000).unwrap();
-        assert_eq!(picked.size(), 35673, "should skip 30531 = 3 * 10177");
-
-        // 1518 is marginally cheaper to transform than 1034, but 47% bigger, so it is not
-        // worth growing for; the smallest is kept.
-        assert!(estimated_transform_cost(1518) < estimated_transform_cost(1034));
-        assert_eq!(CooleyTukeyDomain::<Fr767>::smallest_at_least(1000).unwrap().size(), 1034);
-        assert_eq!(CooleyTukeyDomain::<Fr767>::smallest_at_least(253).unwrap().size(), 253);
     }
 
     #[test]
@@ -693,63 +610,17 @@ mod perf {
             assert_eq!(a, b);
             println!(
                 "n = {:>6}: cooley-tukey {:>8} us, naive {:>9} us, speedup {:.1}x",
-                n, ct_us, naive_us, naive_us as f64 / ct_us as f64
+                n,
+                ct_us,
+                naive_us,
+                naive_us as f64 / ct_us as f64
             );
         }
     }
 }
 
-
-
 #[cfg(test)]
-mod coverage {
-    use super::*;
-    type Fr767 = ark_bw6_767::Fr;
-
-    /// The domain-size sequence available to APK-381, asserted rather than described.
-    ///
-    /// These are the divisors of the usable smooth part of `q - 1`. The sequence is a property
-    /// of the field, not a tuning choice: its sparseness sets how much a caller's validator
-    /// count gets padded, and its ceiling sets the largest supported set.
-    #[test]
-    fn domain_sizes_cover_the_supported_range() {
-        let sizes = admissible_sizes::<Fr767>(MAX_ADMISSIBLE_SIZE);
-
-        // Every size divides q - 1, which is what makes it a subgroup order at all.
-        for &n in &sizes {
-            assert!(
-                subgroup_generator::<Fr767>(n).is_some(),
-                "{} is not a subgroup order",
-                n
-            );
-        }
-
-        let in_range: Vec<usize> =
-            sizes.iter().copied().filter(|&n| (5..=500_000).contains(&n)).collect();
-        assert_eq!(in_range.len(), 57, "domain sizes available for 5..=500_000");
-
-        // Padding: how much larger than requested a caller can be forced to go. Driven by the
-        // gaps in the divisor lattice, so it cannot be tuned away.
-        let worst = in_range
-            .windows(2)
-            .map(|w| w[1] as f64 / w[0] as f64)
-            .fold(0.0f64, f64::max);
-        assert!(worst < 2.0, "worst-case padding {:.2}x", worst);
-
-        // The whole requested range is reachable. Checked against the size list rather than by
-        // constructing the domains: at these sizes that means building Rader kernels and
-        // million-entry twiddle tables, which is minutes of work for no extra assurance.
-        let base = *sizes.iter().find(|&&n| n >= 500_001).expect("500k validators");
-        assert_eq!(base, 671_682); // 2 * 3 * 11 * 10177
-        assert!(
-            sizes.iter().any(|&m| m >= 4 * base - 2),
-            "the PIOP also needs a domain of at least 4N - 2"
-        );
-    }
-}
-
-#[cfg(test)]
-mod vs_radix2 {
+mod comparison {
     use super::*;
     use crate::Radix2Domain;
     use ark_std::{test_rng, UniformRand};

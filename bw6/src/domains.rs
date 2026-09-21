@@ -218,7 +218,9 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
     /// one genuinely curve-specific step in the PIOP, so it is delegated to the domain set; see
     /// [`DomainSet::shift_over_large`].
     pub fn shift_over_4x(&self, poly: &DensePolynomial<F>, evals_over_4x: &Evals<F>) -> Evals<F> {
-        self.domains.shift_over_large(poly, &evals_over_4x.evals).into()
+        self.domains
+            .shift_over_large(poly, &evals_over_4x.evals)
+            .into()
     }
 
     fn first_lagrange_basis_polynomial(domain_size: usize) -> Vec<F> {
@@ -417,7 +419,12 @@ mod tests {
 
         for i in 0..domains.domain4x().size() {
             let point = domains.domain4x().element(i) * domains.omega;
-            assert_eq!(shifted.evals[i], poly.evaluate(&point), "mismatch at index {}", i);
+            assert_eq!(
+                shifted.evals[i],
+                poly.evaluate(&point),
+                "mismatch at index {}",
+                i
+            );
         }
     }
 

@@ -166,7 +166,8 @@ impl ApkConfig for Bls12_377Config {
 /// BW6-767's scalar field has two-adicity **1**. No power-of-two domain beyond size 2 exists
 /// there and no domain size is divisible by 4, so sizes are divisors of
 /// `2 * 3^2 * 11 * 23 * 47 * 10177` and are transformed by Cooley-Tukey, with Rader for the
-/// large factor. The domain triple is `n, 2n, 6n`; see [`crate::APK381_DOMAIN_SIZES`].
+/// large factor. The domain triple is `n, 2n, 6n`; see
+/// [`crate::instances::bls12_381_bw6_767::APK381_DOMAIN_SIZES`].
 ///
 /// The `packed` scheme is unavailable here — it needs `256 | n`. Asking for it is a compile
 /// error; see [`crate::SupportsPackedScheme`].
@@ -223,7 +224,11 @@ where
     /// initial value — and rounded up to a size the field supports.
     pub fn domain_size(keyset_size: usize) -> Result<usize, crate::DomainError> {
         use crate::domain::FftDomain;
-        Ok(<C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(keyset_size + 1)?.base().size())
+        Ok(
+            <C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(keyset_size + 1)?
+                .base()
+                .size(),
+        )
     }
 
     /// Interpolates and commits to a signer set.
@@ -355,10 +360,8 @@ mod tests {
         fn roundtrip<C: ApkConfig>(n: usize) -> bool
         where
             ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
-            <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<
-                    ScalarOf<C>,
-                    Affine = <C::OuterCurve as CurveGroup>::Affine,
-                > + Clone,
+            <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine>
+                + Clone,
             PcsParamsOf<C>: Clone,
         {
             let rng = &mut test_rng();
@@ -406,7 +409,11 @@ mod tests {
         let d381 = <D381 as DomainSet<_>>::for_min_size(200).unwrap();
         assert_eq!(d381.base().size(), 253); // 11 * 23
         assert_eq!(d381.large().size(), 6 * 253);
-        assert_ne!(d381.base().size() % 4, 0, "no BW6-767 domain is a multiple of 4");
+        assert_ne!(
+            d381.base().size() % 4,
+            0,
+            "no BW6-767 domain is a multiple of 4"
+        );
     }
 
     #[test]

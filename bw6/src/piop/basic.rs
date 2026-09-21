@@ -4,11 +4,13 @@ use ark_poly::univariate::DensePolynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use w3f_pcs::pcs::PCS;
 
-use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
-use crate::domain::{DomainSet, FftDomain};
+use crate::domain::DomainSet;
 use crate::domains::Domains;
+use crate::piop::affine_addition::{
+    AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials,
+};
 use crate::piop::{ProverProtocol, RegisterEvaluations};
-use crate::piop::affine_addition::{AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials};
+use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AffineAdditionEvaluationsWithoutBitmask<F: FftField> {
@@ -45,9 +47,17 @@ where
     type E = AffineAdditionEvaluationsWithoutBitmask<OC::ScalarField>;
     type PI = AccountablePublicInput<IC>;
 
-    fn init(domains: Domains<OC::ScalarField, D>, bitmask: Bitmask, keyset: Keyset<IC, OC, D>) -> Self {
+    fn init(
+        domains: Domains<OC::ScalarField, D>,
+        bitmask: Bitmask,
+        keyset: Keyset<IC, OC, D>,
+    ) -> Self {
         BasicRegisterBuilder {
-            registers:  AffineAdditionRegisters::<OC::ScalarField, D>::new(domains, keyset, &bitmask.to_bits()),
+            registers: AffineAdditionRegisters::<OC::ScalarField, D>::new(
+                domains,
+                keyset,
+                &bitmask.to_bits(),
+            ),
             register_evaluations: None,
         }
     }
@@ -71,8 +81,12 @@ where
     }
 
     // bitmask register polynomial is not committed to...
-    fn evaluate_register_polynomials(&mut self, point: OC::ScalarField) -> AffineAdditionEvaluationsWithoutBitmask<OC::ScalarField> {
-        let evals: AffineAdditionEvaluations<OC::ScalarField> = self.registers.evaluate_register_polynomials(point);
+    fn evaluate_register_polynomials(
+        &mut self,
+        point: OC::ScalarField,
+    ) -> AffineAdditionEvaluationsWithoutBitmask<OC::ScalarField> {
+        let evals: AffineAdditionEvaluations<OC::ScalarField> =
+            self.registers.evaluate_register_polynomials(point);
         self.register_evaluations = Some(evals.clone());
         AffineAdditionEvaluationsWithoutBitmask {
             keyset: evals.keyset,
@@ -80,7 +94,11 @@ where
         }
     }
 
-    fn compute_linearization_polynomial(&self, phi: OC::ScalarField, zeta: OC::ScalarField) -> DensePolynomial<OC::ScalarField> {
+    fn compute_linearization_polynomial(
+        &self,
+        phi: OC::ScalarField,
+        zeta: OC::ScalarField,
+    ) -> DensePolynomial<OC::ScalarField> {
         let evals = self.register_evaluations.as_ref().unwrap();
         let parts = self.registers.compute_constraints_linearized(evals, zeta);
         utils::randomize(phi, &parts)

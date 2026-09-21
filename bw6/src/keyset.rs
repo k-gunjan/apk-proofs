@@ -1,14 +1,14 @@
-use ark_ec::CurveGroup;
+use crate::domain::{DomainSet, FftDomain};
+use crate::domains::{Domains, Evals};
+use crate::hash_to_curve;
 use ark_ec::AffineRepr;
+use ark_ec::CurveGroup;
 use ark_ff::PrimeField;
 use ark_poly::{univariate::DensePolynomial, DenseUVPolynomial};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+use std::marker::PhantomData;
 use w3f_pcs::pcs::Commitment;
 use w3f_pcs::pcs::{CommitterKey, PCS};
-use std::marker::PhantomData;
-use crate::hash_to_curve;
-use crate::domain::{DomainSet, FftDomain};
-use crate::domains::{Domains, Evals};
 
 // Polynomial commitment to the vector of public keys.
 // Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
@@ -30,12 +30,12 @@ use crate::domains::{Domains, Evals};
 // Verifier checks the signatures and can trust that the properties hold under some "2/3 honest validators" assumption.
 // As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
 
-// The commitment type is generic over different PCS implementations. To extract the 
+// The commitment type is generic over different PCS implementations. To extract the
 // underlying curve point, access the specific implementation's inner field. For example,
 // KzgCommitment<E: Pairing> wraps the point as `pub struct KzgCommitment(pub E::G1Affine)`,
 // so the affine coordinates can be accessed via the `.0` field accessor.
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
-pub struct KeysetCommitment<F,C>
+pub struct KeysetCommitment<F, C>
 where
     F: PrimeField,
     C: Commitment<F>,
@@ -43,9 +43,6 @@ where
     /// Per-coordinate commitments to public key polynomials
     pub pks_comm: (C, C),
     /// Size of the domain used to interpolate the vectors above.
-    ///
-    /// Not a log. BW6-767's scalar field has two-adicity 1, so its domain sizes are divisors of
-    /// `q - 1` rather than powers of two and cannot be recovered from an exponent.
     pub domain_size: u64,
     _m: PhantomData<F>,
 }
@@ -55,7 +52,7 @@ pub struct Keyset<IC, OC, D>
 where
     IC: CurveGroup,
     OC: CurveGroup,
-    OC::ScalarField: From<IC::BaseField>,
+    // OC::ScalarField: From<IC::BaseField>,
     D: DomainSet<OC::ScalarField>,
 {
     // Actual public keys, no padding.
@@ -64,7 +61,7 @@ where
     pub pks_polys: [DensePolynomial<OC::ScalarField>; 2],
     // The domains used to compute the interpolations above, and to expand them.
     pub domains: D,
-    // Polynomials above, evaluated over a 4-times larger domain.
+    // Polynomials above, evaluated over at a domain of size at least (4n-2).
     // Used by the prover to populate the AIR execution trace.
     pub pks_evals_x4: Option<[Evals<OC::ScalarField>; 2]>,
 }
@@ -126,16 +123,15 @@ where
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
-    pub fn commit<S>(
-        &self,
-        kzg_pk: &S::CK,
-    ) -> KeysetCommitment<OC::ScalarField, S::C> 
-    where 
-        S: PCS<OC::ScalarField>
+    pub fn commit<S>(&self, kzg_pk: &S::CK) -> KeysetCommitment<OC::ScalarField, S::C>
+    where
+        S: PCS<OC::ScalarField>,
     {
         assert!(self.domain().size() <= kzg_pk.max_degree() + 1);
-        let pks_x_comm = S::commit(kzg_pk, &self.pks_polys[0]).expect("Commitment to pks_x_poly failed");
-        let pks_y_comm = S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
+        let pks_x_comm =
+            S::commit(kzg_pk, &self.pks_polys[0]).expect("Commitment to pks_x_poly failed");
+        let pks_y_comm =
+            S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             domain_size: self.domain().size() as u64,

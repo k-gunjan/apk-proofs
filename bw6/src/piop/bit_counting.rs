@@ -1,12 +1,12 @@
-use ark_ff::{FftField, Field, One, PrimeField, Zero};
-use ark_poly::Polynomial;
+use ark_ff::{FftField, Field, PrimeField, Zero};
 use ark_poly::univariate::DensePolynomial;
+use ark_poly::Polynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::iter::once;
 
-use crate::Bitmask;
-use crate::domain::{DomainSet, FftDomain};
+use crate::domain::DomainSet;
 use crate::domains::Domains;
+use crate::Bitmask;
 
 // This "gadget" is used in the 'counting' scheme to constraint the number of set bits in the bitmask.
 
@@ -42,10 +42,7 @@ impl<F: PrimeField, D: DomainSet<F>> BitCountingRegisters<F, D> {
         Self::new_unchecked(domains, bitmask, partial_counts)
     }
 
-    fn new_unchecked(domains: Domains<F, D>,
-                     bitmask: Vec<F>,
-                     partial_counts: Vec<F>,
-    ) -> Self {
+    fn new_unchecked(domains: Domains<F, D>, bitmask: Vec<F>, partial_counts: Vec<F>) -> Self {
         let partial_counts = domains.interpolate(partial_counts);
         Self {
             domains,
@@ -99,12 +96,13 @@ struct BitmaskEndsWithZero {}
 // Constraints the last bitmask element to 0
 // by showing that the polynomial b(X) * L_{n-1}(X) is zero over the domain.
 impl BitmaskEndsWithZero {
-
     // C = b * L_{n-1}
-    fn constraint_poly<F: PrimeField, D: DomainSet<F>>(registers: &BitCountingRegisters<F, D>) -> DensePolynomial<F> {
+    fn constraint_poly<F: PrimeField, D: DomainSet<F>>(
+        registers: &BitCountingRegisters<F, D>,
+    ) -> DensePolynomial<F> {
         let n = registers.domains.size;
         let mut ln = vec![F::zero(); n];
-        ln[n-1] = F::one();
+        ln[n - 1] = F::one();
         let ln_x2 = registers.domains.amplify_x2(ln);
         let b_x2 = registers.domains.amplify_x2(registers.bitmask.clone());
         let c = &b_x2 * &ln_x2;
@@ -129,13 +127,14 @@ struct BitCount {}
 
 // partial_counts(wZ) - partial_counts(Z) - bitmask(Z) + count*L_{n-1}(Z)
 impl BitCount {
-
     fn constraint_poly<F: Field>() -> DensePolynomial<F> {
         DensePolynomial::zero()
     }
 
     // Though the constraint is zero, the verifier still needs the opening of the register in zeta * omega.
-    fn linearization<F: PrimeField, D: DomainSet<F>>(registers: &BitCountingRegisters<F, D>) -> DensePolynomial<F> {
+    fn linearization<F: PrimeField, D: DomainSet<F>>(
+        registers: &BitCountingRegisters<F, D>,
+    ) -> DensePolynomial<F> {
         registers.get_partial_counts_polynomial()
     }
 
@@ -159,7 +158,6 @@ impl BitCount {
     }
 }
 
-
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone)]
 pub struct BitCountingEvaluation<F: FftField>(pub F);
 
@@ -181,12 +179,13 @@ impl<F: FftField> BitCountingEvaluation<F> {
 mod tests {
     type TestDomain = crate::Radix2DomainSet<ark_bw6_761::Fr>;
     type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
-    use ark_poly::Polynomial;
-    use ark_std::{test_rng, UniformRand};
-    use ark_bw6_761::{Fr, BW6_761};
+    use crate::domain::FftDomain;
     use crate::test_helpers::{_random_bitmask, _random_bits};
     use crate::utils;
     use crate::utils::lagrange_evaluations;
+    use ark_bw6_761::Fr;
+    use ark_poly::Polynomial;
+    use ark_std::{test_rng, UniformRand};
 
     use super::*;
 
@@ -195,11 +194,12 @@ mod tests {
         let rng = &mut test_rng();
         let n = 16;
         let bitmask = _random_bitmask::<_, ark_bw6_761::G1Projective>(n, rng);
-        let partial_counts = BitCountingRegisters::<Fr, TestDomain>::build_partial_counts_register(&bitmask);
+        let partial_counts =
+            BitCountingRegisters::<Fr, TestDomain>::build_partial_counts_register(&bitmask);
 
         assert_eq!(partial_counts.len(), 16);
         assert_eq!(partial_counts[0], Fr::zero());
-        for i in 1..n-1 {
+        for i in 1..n - 1 {
             assert_eq!(partial_counts[i], bitmask[..i].iter().sum());
         }
     }
@@ -224,13 +224,18 @@ mod tests {
 
         let x_full = BitCount::constraint_poly::<Fr>();
         let x_lin = BitCount::linearization(&registers);
-        let x_eval_full = BitCount::_evaluate_full(&acc_z, count, acc_zw, bitmask_z, domain_z.l_last);
+        let x_eval_full =
+            BitCount::_evaluate_full(&acc_z, count, acc_zw, bitmask_z, domain_z.l_last);
         let x_eval_main = BitCount::evaluate_main(&acc_z, count, bitmask_z, domain_z.l_last);
         let x_lin_zw = x_lin.evaluate(&(z * w));
 
         assert_eq!(x_eval_full, x_full.evaluate(&z));
         assert_eq!(x_eval_full, x_eval_main + x_lin_zw);
-        assert!(domains.domain().divide_by_vanishing_poly(&x_full).1.is_zero()); // actually x_full is 0 over the field
+        assert!(domains
+            .domain()
+            .divide_by_vanishing_poly(&x_full)
+            .1
+            .is_zero()); // actually x_full is 0 over the field
     }
 
     #[test]
@@ -243,7 +248,7 @@ mod tests {
         let bits = _random_bits(n, 2.0 / 3.0, rng);
 
         let mut good_bitmask = bits.clone();
-        good_bitmask[n-1] = false;
+        good_bitmask[n - 1] = false;
         let good_bitmask = Bitmask::from_bits(&good_bitmask);
         let registers = BitCountingRegisters::<Fr, TestDomain>::new(domains.clone(), &good_bitmask);
         let constraint = BitmaskEndsWithZero::constraint_poly(&registers);
@@ -254,11 +259,12 @@ mod tests {
         let prover_eval = constraint.evaluate(&zeta);
         let domain_evals = lagrange_evaluations(zeta, &domain);
         let bitmask_at_zeta = registers.get_bitmask_polynomial().evaluate(&zeta);
-        let verifier_eval = BitmaskEndsWithZero::_evaluate_full::<Fr>(bitmask_at_zeta, domain_evals.l_last);
+        let verifier_eval =
+            BitmaskEndsWithZero::_evaluate_full::<Fr>(bitmask_at_zeta, domain_evals.l_last);
         assert_eq!(prover_eval, verifier_eval);
 
         let mut bad_bitmask = bits.clone();
-        bad_bitmask[n-1] = true;
+        bad_bitmask[n - 1] = true;
         let bad_bitmask = Bitmask::from_bits(&bad_bitmask);
         let registers = BitCountingRegisters::<Fr, TestDomain>::new(domains.clone(), &bad_bitmask);
         let constraint = BitmaskEndsWithZero::constraint_poly(&registers);

@@ -1,5 +1,5 @@
 //! Concrete curve instantiations for APK proofs
-//! 
+//!
 //! This module provides pre-configured type aliases for common curve pairings
 //! with different polynomial commitment schemes.
 

@@ -1,29 +1,30 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
-use ark_ec::pairing::Pairing;
-use ark_std::{One, Zero};
 use ark_ec::short_weierstrass::{Affine, SWCurveConfig};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use w3f_pcs::pcs::kzg::commitment::KzgCommitment;
+use ark_std::{One, Zero};
+use w3f_pcs::pcs::commitment::WrappedAffine;
 
 pub use bitmask::Bitmask;
 pub use keyset::{Keyset, KeysetCommitment};
 
-use crate::piop::RegisterEvaluations;
 use crate::piop::affine_addition::{PartialSumsAndBitmaskCommitments, PartialSumsCommitments};
 use crate::piop::basic::AffineAdditionEvaluationsWithoutBitmask;
-use crate::piop::bitmask_packing::{BitmaskPackingCommitments, SuccinctAccountableRegisterEvaluations};
+use crate::piop::bitmask_packing::{
+    BitmaskPackingCommitments, SuccinctAccountableRegisterEvaluations,
+};
 use crate::piop::counting::{CountingCommitments, CountingEvaluations};
+use crate::piop::RegisterEvaluations;
 
 pub use self::prover::*;
 pub use self::verifier::*;
 
-mod prover;
-mod verifier;
 pub mod endo;
-pub mod utils;
 pub mod instances;
+mod prover;
+pub mod utils;
+mod verifier;
 
 pub mod bls;
 pub mod config;
@@ -34,47 +35,49 @@ pub use config::{
     PcsParamsOf, ProverOf, ScalarOf, SimpleProofOf, VerifierOf,
 };
 pub use domain::{
-    CooleyTukeyDomain, DomainError, DomainFactory, DomainSet, FftDomain, NaiveDomain,
-    Radix2Domain, Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme, APK381_DOMAIN_SIZES,
+    CooleyTukeyDomain, DomainError, DomainSet, DomainSizes, FftDomain, NaiveDomain,
+    Radix2Domain, Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme,
 };
 
 mod transcript;
 
-mod fsrng;
 pub mod domains;
+mod fsrng;
 mod piop;
 
-pub mod setup;
 mod bitmask;
 mod keyset;
+pub mod setup;
 pub mod test_helpers;
 
 /// Trait to extract the underlying curve point from a type e.g. commitment and get it back.
 pub trait CommitmentExt<F: PrimeField> {
     type Affine: AffineRepr<ScalarField = F>;
-    
+
     /// Extract the underlying affine point
     fn to_affine(&self) -> Self::Affine;
 
     /// Construct the commitment from an affine point
-    fn from_affine(p: Self::Affine) ->Self;
+    fn from_affine(p: Self::Affine) -> Self;
 }
 
-impl<E: Pairing> CommitmentExt<E::ScalarField> for KzgCommitment<E> {
-    type Affine = E::G1Affine;
-    
+/// w3f-pcs's KZG commits to a curve point wrapped in [`WrappedAffine`]; this is how the rest of
+/// the crate gets the point back out without naming KZG.
+impl<C: CurveGroup> CommitmentExt<C::ScalarField> for WrappedAffine<C> {
+    type Affine = C::Affine;
+
     fn to_affine(&self) -> Self::Affine {
         self.0
     }
 
-    fn from_affine(p: Self::Affine) ->Self {
-        KzgCommitment(p)
+    fn from_affine(p: Self::Affine) -> Self {
+        WrappedAffine(p)
     }
 }
 
 // TODO: 1. From trait?
 // TODO: 2. remove refs/clones
-pub trait PublicInput<C: CurveGroup> : CanonicalSerialize + CanonicalDeserialize {
+pub trait PublicInput<C: CurveGroup>: CanonicalSerialize + CanonicalDeserialize {
     fn new(apk: &C::Affine, bitmask: &Bitmask) -> Self;
 }
 
@@ -117,7 +120,7 @@ impl<C: CurveGroup> PublicInput<C> for CountingPublicInput<C> {
 /// - `E`: Register evaluations type
 /// - `C`: First round register commitments type
 /// - `AC`: Second round additional commitments type (for packed scheme)
-/// - `Comm`: Commitment type (e.g., KzgCommitment)
+/// - `Comm`: Commitment type (e.g., `WrappedAffine`)
 /// - `OProof`: Opening proof type (PCS-specific)
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct Proof<F, E, C, AC, Comm, OProof>
@@ -167,14 +170,8 @@ pub type PackedProof<F, G, Comm, OProof> = Proof<
     OProof,
 >;
 /// Counting proof type (only proves count, not individual bits)
-pub type CountingProof<F, G, Comm, OProof> = Proof<
-    F,
-    CountingEvaluations<F>,
-    CountingCommitments<G>,
-    (),
-    Comm,
-    OProof,
->;
+pub type CountingProof<F, G, Comm, OProof> =
+    Proof<F, CountingEvaluations<F>, CountingCommitments<G>, (), Comm, OProof>;
 
 pub fn point_in_g1_complement<P: SWCurveConfig>() -> Affine<P> {
     let h_x: P::BaseField = P::BaseField::zero();
@@ -184,8 +181,7 @@ pub fn point_in_g1_complement<P: SWCurveConfig>() -> Affine<P> {
 }
 
 // TODO: Generator + one should be in the group complement. better approach?
-pub fn point_in_g1_complement_g<C: CurveGroup>() ->C
-{
+pub fn point_in_g1_complement_g<C: CurveGroup>() -> C {
     let mut h = C::zero();
     let one = C::ScalarField::one();
     h += C::generator() * one;
@@ -194,8 +190,8 @@ pub fn point_in_g1_complement_g<C: CurveGroup>() ->C
 
 // TODO: switch to better hash to curve when available
 pub fn hash_to_curve<G: CurveGroup>(message: &[u8]) -> G {
-    use blake2::Digest;
     use ark_std::rand::SeedableRng;
+    use blake2::Digest;
 
     let seed = blake2::Blake2s::digest(message);
     let rng = &mut rand::rngs::StdRng::from_seed(seed.into());
@@ -216,7 +212,7 @@ mod tests {
         assert!(!h.is_in_correct_subgroup_assuming_on_curve());
     }
 
-     #[test]
+    #[test]
     fn h_is_not_in_g1_bls12() {
         let h = point_in_g1_complement::<ark_bls12_377::g1::Config>();
         assert!(h.is_on_curve());
@@ -228,7 +224,6 @@ mod tests {
         test_helpers::test_simple_scheme(255);
     }
 
-
     #[test]
     fn test_packed_scheme() {
         test_helpers::test_packed_scheme(255);
@@ -239,16 +234,21 @@ mod tests {
         test_helpers::test_counting_scheme(255);
     }
 
-    // APK-381. 252 keys need a domain of at least 253, which is 11 * 23 exactly; the expanded
-    // domains are then 506 and 1034. None is a power of two, and none is a multiple of 4.
+    // APK-381. 516 keys need a domain of at least 517, which is 11 * 47 exactly; the expanded
+    // domains are then 1034 and 3102. None is a power of two, and none is a multiple of 4.
+    //
+    // 517 rather than the smaller 253 on purpose: ark-poly switches polynomial division to an
+    // FFT-based algorithm once the divisor's degree reaches 256, which this field cannot
+    // support. Every 381 test used to sit just under that line, so the prover panicked for
+    // every real validator set while the suite stayed green.
     #[test]
     fn test_simple_scheme_381() {
-        test_helpers::test_simple_scheme_381(252);
+        test_helpers::test_simple_scheme_381(516);
     }
 
     #[test]
     fn test_counting_scheme_381() {
-        test_helpers::test_counting_scheme_381(252);
+        test_helpers::test_counting_scheme_381(516);
     }
 
     #[test]
@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn test_rejects_tampering_381() {
-        test_helpers::test_rejects_tampering_381(252);
+        test_helpers::test_rejects_tampering_381(516);
     }
 
     #[test]
@@ -294,7 +294,9 @@ mod tests {
                 if path.extension().and_then(|e| e.to_str()) != Some("rs") {
                     continue;
                 }
-                let rel = path.strip_prefix(env!("CARGO_MANIFEST_DIR")).unwrap_or(&path);
+                let rel = path
+                    .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                    .unwrap_or(&path);
                 let rel = rel.to_string_lossy().replace('\\', "/");
                 // Where naming a concrete curve or domain is the entire point.
                 if rel.contains("src/instances/")
@@ -332,7 +334,14 @@ mod tests {
         }
 
         let mut findings = Vec::new();
-        visit(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")), &mut findings);
-        assert!(findings.is_empty(), "generic code is not generic:\n  {}", findings.join("\n  "));
+        visit(
+            Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")),
+            &mut findings,
+        );
+        assert!(
+            findings.is_empty(),
+            "generic code is not generic:\n  {}",
+            findings.join("\n  ")
+        );
     }
 }

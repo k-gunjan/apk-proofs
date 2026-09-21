@@ -15,6 +15,8 @@ pub fn parse_args_or(default_validators: usize, scheme: &str) -> usize {
             );
             default_validators
         }
-        Some(arg) => arg.parse().unwrap_or_else(|_| panic!("{} is not a valid parameter", arg)),
+        Some(arg) => arg
+            .parse()
+            .unwrap_or_else(|_| panic!("{} is not a valid parameter", arg)),
     }
 }

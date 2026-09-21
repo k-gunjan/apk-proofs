@@ -1,7 +1,7 @@
 use ark_ff::PrimeField;
 use ark_poly::{EvaluationDomain, Radix2EvaluationDomain};
 
-use super::types::{DomainError, DomainFactory, FftDomain};
+use super::types::{DomainError, FftDomain};
 
 /// Radix-2 domain, backed by arkworks. Used by APK-377 (BW6-761 scalar field, two-adicity 46).
 ///
@@ -11,13 +11,27 @@ use super::types::{DomainError, DomainFactory, FftDomain};
 pub struct Radix2Domain<F: PrimeField>(pub Radix2EvaluationDomain<F>);
 
 impl<F: PrimeField> Radix2Domain<F> {
-    /// Panics if the field lacks the two-adicity for a domain of this size.
-    /// `DomainFactory::create_domain` is the same thing; both round `size` up to a power of two.
+    /// The smallest power-of-two domain of at least `size`.
+    ///
+    /// Fails when the field lacks the two-adicity for it, which for BW6-761 means a size beyond
+    /// `2^46`.
+    ///
+    /// The rounding is done here rather than left to arkworks: `Radix2EvaluationDomain::new`
+    /// calls `next_power_of_two` unguarded, which for a `size` above `usize::MAX / 2 + 1`
+    /// overflows and panics in a debug build. `size` reaches this from a keyset commitment,
+    /// which for a bridge arrives from the chain, so it has to fail as an error rather than
+    /// take the process down.
+    pub fn try_new(size: usize) -> Result<Self, DomainError> {
+        let too_large = DomainError::TooLarge { requested: size };
+        let rounded = size.checked_next_power_of_two().ok_or(too_large)?;
+        Radix2EvaluationDomain::<F>::new(rounded)
+            .map(Radix2Domain)
+            .ok_or(too_large)
+    }
+
+    /// Panicking shorthand for [`try_new`](Self::try_new), for sizes already known reachable.
     pub fn new(size: usize) -> Self {
-        Radix2Domain(
-            Radix2EvaluationDomain::<F>::new(size)
-                .expect("insufficient two-adicity for a radix-2 domain of this size"),
-        )
+        Self::try_new(size).expect("insufficient two-adicity for a radix-2 domain of this size")
     }
 }
 
@@ -60,11 +74,24 @@ impl<F: PrimeField> FftDomain<F> for Radix2Domain<F> {
 /// Radix-2 domains are powers of two, so every size from 256 up is a multiple of 256.
 impl<F: PrimeField> super::types::SupportsPackedScheme for Radix2Domain<F> {}
 
-impl<F: PrimeField> DomainFactory<F> for Radix2Domain<F> {
-    fn try_create_domain(size: usize) -> Result<Self, DomainError> {
-        Radix2EvaluationDomain::<F>::new(size)
-            .map(Radix2Domain)
-            .ok_or(DomainError::TooLarge { requested: size })
+#[cfg(test)]
+mod untrusted_sizes {
+    use super::*;
+    use ark_bw6_761::Fr as GuardFr;
+
+    /// A domain size out of an untrusted keyset commitment must come back as an error on every
+    /// build profile. arkworks' own constructor overflows `next_power_of_two` here and panics
+    /// in debug, which would turn a malformed commitment into a crashed light client.
+    #[test]
+    fn an_absurd_size_is_rejected_rather_than_overflowing() {
+        for size in [usize::MAX, usize::MAX / 2 + 2, 1usize << 62] {
+            assert_eq!(
+                Radix2Domain::<GuardFr>::try_new(size).unwrap_err(),
+                DomainError::TooLarge { requested: size },
+                "size {}",
+                size
+            );
+        }
     }
 }
 

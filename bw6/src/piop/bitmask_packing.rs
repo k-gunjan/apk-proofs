@@ -1,17 +1,19 @@
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{FftField, Field, One, PrimeField, Zero};
-use ark_poly::Polynomial;
+use ark_ff::{FftField, Field, PrimeField};
 use ark_poly::polynomial::univariate::DensePolynomial;
+use ark_poly::Polynomial;
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::{end_timer, start_timer};
 use w3f_pcs::pcs::PCS;
 
-use crate::{Bitmask, utils};
-use crate::domain::{DomainSet, FftDomain};
+use crate::domain::DomainSet;
 use crate::domains::{Domains, Evals};
-use crate::piop::{RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol};
 use crate::piop::affine_addition::{AffineAdditionEvaluations, PartialSumsAndBitmaskCommitments};
+use crate::piop::{
+    RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
+};
 use crate::utils::LagrangeEvaluations;
+use crate::{utils, Bitmask};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone)]
 pub struct BitmaskPackingCommitments<G: AffineRepr> {
@@ -27,10 +29,7 @@ impl<G: AffineRepr> BitmaskPackingCommitments<G> {
 
 impl<G: AffineRepr> RegisterCommitments<G> for BitmaskPackingCommitments<G> {
     fn as_vec(&self) -> Vec<G> {
-        vec![
-            self.c_comm,
-            self.acc_comm,
-        ]
+        vec![self.c_comm, self.acc_comm]
     }
 }
 
@@ -43,10 +42,7 @@ pub struct BitmaskPackingPolynomials<F: Field> {
 impl<F: Field> BitmaskPackingPolynomials<F> {
     //TODO: &self
     pub fn to_vec(self) -> Vec<DensePolynomial<F>> {
-        vec![
-            self.c_poly,
-            self.acc_poly,
-        ]
+        vec![self.c_poly, self.acc_poly]
     }
 }
 
@@ -54,10 +50,7 @@ impl<G: AffineRepr> RegisterPolynomials<G> for BitmaskPackingPolynomials<G::Scal
     type C = BitmaskPackingCommitments<G>;
 
     fn commit<F: Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: F) -> Self::C {
-        BitmaskPackingCommitments::<G>::new(
-            f(&self.c_poly),
-            f(&self.acc_poly),
-        )
+        BitmaskPackingCommitments::<G>::new(f(&self.c_poly), f(&self.acc_poly))
     }
 }
 
@@ -85,12 +78,12 @@ impl<F: PrimeField> SuccinctAccountableRegisterEvaluations<F> {
         r: F,
         bitmask: &Bitmask,
         domain_size: u64,
-    ) -> Vec<F> 
-where
+    ) -> Vec<F>
+    where
         IC: CurveGroup,
         OC: CurveGroup<ScalarField = F>,
-        OC::ScalarField: From<IC::BaseField>,     
-{
+        OC::ScalarField: From<IC::BaseField>,
+    {
         let bits_in_bitmask_chunk = 256;
         let bits_in_big_int_limb = 64;
         assert_eq!(bits_in_bitmask_chunk % bits_in_big_int_limb, 0);
@@ -106,27 +99,30 @@ where
         //TODO: pad in Bitmask
         bitmask_chunks.resize_with(chunks_in_bitmask as usize, || F::zero());
         assert_eq!(powers_of_r.len(), bitmask_chunks.len());
-        let aggregated_bitmask = bitmask_chunks.into_iter()
+        let aggregated_bitmask = bitmask_chunks
+            .into_iter()
             .zip(powers_of_r)
             .map(|(bj, rj)| bj * rj)
             .sum::<F>();
 
-
         let t_a_zeta_omega1 = start_timer!(|| "A(zw) as fraction");
         let zeta_omega_pow_m = evals_at_zeta.zeta_omega.pow([chunks_in_bitmask]); // m = chunks_in_bitmask
         let zeta_omega_pow_n = zeta_omega_pow_m.pow([bits_in_bitmask_chunk]); // n = domain_size
-        let a_zeta_omega1 = bits_in_bitmask_chunk_inv * (zeta_omega_pow_n - F::one()) / (zeta_omega_pow_m - F::one());
+        let a_zeta_omega1 = bits_in_bitmask_chunk_inv * (zeta_omega_pow_n - F::one())
+            / (zeta_omega_pow_m - F::one());
         end_timer!(t_a_zeta_omega1);
 
         let t_a_zeta_omega2 = start_timer!(|| "A(zw) as polynomial");
         let zeta_omega_pow_m = evals_at_zeta.zeta_omega.pow([chunks_in_bitmask]); // m = chunks_in_bitmask
-        let a_zeta_omega2 = bits_in_bitmask_chunk_inv * utils::powers(zeta_omega_pow_m, (bits_in_bitmask_chunk - 1) as usize).iter().sum::<F>();
+        let a_zeta_omega2 = bits_in_bitmask_chunk_inv
+            * utils::powers(zeta_omega_pow_m, (bits_in_bitmask_chunk - 1) as usize)
+                .iter()
+                .sum::<F>();
         end_timer!(t_a_zeta_omega2);
 
         assert_eq!(a_zeta_omega1, a_zeta_omega2);
         let two = F::from(2u8);
         let a = two + (r / two.pow([255u64]) - two) * a_zeta_omega1;
-
 
         let b = self.basic_evaluations.bitmask;
         let acc = self.acc;
@@ -140,20 +136,18 @@ where
             acc,
         );
 
-        let a7 = evaluate_multipacking_mask_constraint_linearized(
-            a,
-            r_pow_m,
-            &evals_at_zeta,
-            c,
-        );
+        let a7 = evaluate_multipacking_mask_constraint_linearized(a, r_pow_m, &evals_at_zeta, c);
 
-        let mut res = self.basic_evaluations.evaluate_constraint_polynomials::<IC, OC>(apk, evals_at_zeta);
+        let mut res = self
+            .basic_evaluations
+            .evaluate_constraint_polynomials::<IC, OC>(apk, evals_at_zeta);
         res.extend(vec![a6, a7]);
         res
     }
 }
 
-impl<IC, OC, S> VerifierProtocol<IC, OC, S> for SuccinctAccountableRegisterEvaluations<OC::ScalarField> 
+impl<IC, OC, S> VerifierProtocol<IC, OC, S>
+    for SuccinctAccountableRegisterEvaluations<OC::ScalarField>
 where
     IC: CurveGroup,
     OC: CurveGroup,
@@ -161,26 +155,34 @@ where
     S: PCS<OC::ScalarField>,
 {
     type C1 = PartialSumsAndBitmaskCommitments<OC::Affine>;
-    type C2 = BitmaskPackingCommitments::<OC::Affine>;
+    type C2 = BitmaskPackingCommitments<OC::Affine>;
 
     const POLYS_OPENED_AT_ZETA: usize = 8;
 
-    fn restore_commitment_to_linearization_polynomial(&self,
-                                                      phi: OC::ScalarField,
-                                                      zeta_minus_omega_inv: OC::ScalarField,
-                                                      commitments: &PartialSumsAndBitmaskCommitments<OC::Affine>,
-                                                      extra_commitments: &BitmaskPackingCommitments<OC::Affine>,
+    fn restore_commitment_to_linearization_polynomial(
+        &self,
+        phi: OC::ScalarField,
+        zeta_minus_omega_inv: OC::ScalarField,
+        commitments: &PartialSumsAndBitmaskCommitments<OC::Affine>,
+        extra_commitments: &BitmaskPackingCommitments<OC::Affine>,
     ) -> OC {
         let powers_of_phi = utils::powers(phi, 6);
-        let mut r_comm =  <AffineAdditionEvaluations<OC::ScalarField> as VerifierProtocol<IC, OC, S>>::restore_commitment_to_linearization_polynomial(&self.basic_evaluations, phi, zeta_minus_omega_inv, &commitments.partial_sums, &());
+        let mut r_comm = <AffineAdditionEvaluations<OC::ScalarField> as VerifierProtocol<
+            IC,
+            OC,
+            S,
+        >>::restore_commitment_to_linearization_polynomial(
+            &self.basic_evaluations,
+            phi,
+            zeta_minus_omega_inv,
+            &commitments.partial_sums,
+            &(),
+        );
         r_comm += extra_commitments.acc_comm * powers_of_phi[5];
         r_comm += extra_commitments.c_comm * powers_of_phi[6];
         r_comm
     }
 }
-
-
-
 
 // Constraint evaluators shared by prover and verifier. Free functions rather than inherent
 // methods: the verifier evaluates constraints without ever constructing a domain, so it has
@@ -201,9 +203,16 @@ pub(crate) fn evaluate_inner_product_constraint_linearized<F: PrimeField>(
     evals_at_zeta: &LagrangeEvaluations<F>,
     b_zeta: F,
     c_zeta: F,
-    acc_zeta: F
+    acc_zeta: F,
 ) -> F {
-    evaluate_inner_product_constraint(bitmask_chunks_aggregated, evals_at_zeta, b_zeta, c_zeta, acc_zeta, F::zero())
+    evaluate_inner_product_constraint(
+        bitmask_chunks_aggregated,
+        evals_at_zeta,
+        b_zeta,
+        c_zeta,
+        acc_zeta,
+        F::zero(),
+    )
 }
 
 pub(crate) fn evaluate_multipacking_mask_constraint<F: PrimeField>(
@@ -211,7 +220,7 @@ pub(crate) fn evaluate_multipacking_mask_constraint<F: PrimeField>(
     r_pow_m: F,
     evals_at_zeta: &LagrangeEvaluations<F>,
     c_zeta: F,
-    c_zeta_omega: F
+    c_zeta_omega: F,
 ) -> F {
     c_zeta_omega - c_zeta * a - (F::one() - r_pow_m) * evals_at_zeta.l_last
 }
@@ -224,7 +233,6 @@ pub(crate) fn evaluate_multipacking_mask_constraint_linearized<F: PrimeField>(
 ) -> F {
     evaluate_multipacking_mask_constraint(a, r_pow_m, evals_at_zeta, c_zeta, F::zero())
 }
-
 
 pub(crate) struct BitmaskPackingRegisters<F: PrimeField, D: DomainSet<F>> {
     domains: Domains<F, D>,
@@ -241,14 +249,14 @@ pub(crate) struct BitmaskPackingRegisters<F: PrimeField, D: DomainSet<F>> {
 }
 
 impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
-
     // TODO: remove bitmask arg
-    pub fn new(domains: Domains<F, D>,
-               bitmask: &Bitmask,
-               bitmask_chunks_aggregation_challenge: F, // denoted 'r' in the write-ups
+    pub fn new(
+        domains: Domains<F, D>,
+        bitmask: &Bitmask,
+        bitmask_chunks_aggregation_challenge: F, // denoted 'r' in the write-ups
     ) -> Self {
         let n = domains.size;
-        let bits_in_bitmask_chunk = 256;  //256 is the highest power of 2 that fits field bit capacity //TODO: const
+        let bits_in_bitmask_chunk = 256; //256 is the highest power of 2 that fits field bit capacity //TODO: const
         assert_eq!(n % bits_in_bitmask_chunk, 0); // n is a power of 2
 
         let mut bitmask = bitmask.to_bits_as_field_elements();
@@ -257,10 +265,8 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
         let r = bitmask_chunks_aggregation_challenge;
         let c = Self::build_multipacking_mask_register(n, bits_in_bitmask_chunk, r);
         let acc = Self::build_partial_inner_products_register(n, &bitmask, &c);
-        let bitmask_chunks_aggregated = bitmask.iter()
-            .zip(c.iter())
-            .map(|(&b, c)| b * c)
-            .sum::<F>();
+        let bitmask_chunks_aggregated =
+            bitmask.iter().zip(c.iter()).map(|(&b, c)| b * c).sum::<F>();
 
         let mut c_shifted = c.clone();
         c_shifted.rotate_left(1);
@@ -275,7 +281,7 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
             acc,
             acc_shifted,
             bitmask_chunks_aggregated,
-            r
+            r,
         )
     }
 
@@ -288,7 +294,7 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
         acc: Vec<F>,
         acc_shifted: Vec<F>,
         bitmask_chunks_aggregated: F,
-        r: F
+        r: F,
     ) -> Self {
         let c_polynomial = domains.interpolate(c);
         let acc_polynomial = domains.interpolate(acc);
@@ -305,18 +311,23 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
                 c_poly: c_polynomial,
                 acc_poly: acc_polynomial,
             },
-            r
+            r,
         }
     }
 
     //TODO: comment
-    fn build_multipacking_mask_register(domain_size: usize, chunk_size: usize, randomizer: F) -> Vec<F> {
+    fn build_multipacking_mask_register(
+        domain_size: usize,
+        chunk_size: usize,
+        randomizer: F,
+    ) -> Vec<F> {
         let powers_of_2 = utils::powers(F::from(2u8), chunk_size - 1);
         let powers_of_r = utils::powers(randomizer, domain_size / chunk_size - 1);
         // tensor product (powers_of_r X powers_of_2)
-        powers_of_r.iter().flat_map(|rj|
-            powers_of_2.iter().map(move |_2k| *rj * _2k)
-        ).collect::<Vec<F>>()
+        powers_of_r
+            .iter()
+            .flat_map(|rj| powers_of_2.iter().map(move |_2k| *rj * _2k))
+            .collect::<Vec<F>>()
     }
 
     /// Returns length n vec (0, a[0]b[0],...,a[n-2]b[n-2]), where n is domain size
@@ -326,7 +337,8 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
         assert_eq!(b.len(), domain_size);
         let mut acc = Vec::with_capacity(domain_size);
         acc.push(F::zero());
-        a.iter().zip(b.iter())
+        a.iter()
+            .zip(b.iter())
             .map(|(a, b)| *a * b)
             .take(domain_size - 1)
             .for_each(|x| {
@@ -336,18 +348,21 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
     }
 
     pub fn compute_inner_product_constraint_polynomial(&self) -> DensePolynomial<F> {
-        let bc_ln_x4 = self.domains.l_last_scaled_by(self.bitmask_chunks_aggregated);
-        let constraint = &(&(&self.acc_shifted - &self.acc) - &(&self.bitmask * &self.c)) + &bc_ln_x4;
+        let bc_ln_x4 = self
+            .domains
+            .l_last_scaled_by(self.bitmask_chunks_aggregated);
+        let constraint =
+            &(&(&self.acc_shifted - &self.acc) - &(&self.bitmask * &self.c)) + &bc_ln_x4;
         self.domains.interpolate_4x(&constraint)
     }
-
-
 
     pub fn compute_multipacking_mask_constraint_polynomial(&self) -> DensePolynomial<F> {
         let n = self.domains.size;
         let chunks = n / 256; //TODO: consts
         let mut a = vec![F::from(2u8); n];
-        a.iter_mut().step_by(256).for_each(|a| *a = self.r / F::from(2u8).pow([255u64]));
+        a.iter_mut()
+            .step_by(256)
+            .for_each(|a| *a = self.r / F::from(2u8).pow([255u64]));
         a.rotate_left(1);
         let a_x4 = self.domains.amplify(a);
 
@@ -357,11 +372,7 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
         let a7 = &(&self.c_shifted - &(&self.c * &a_x4)) - &ln_x4;
         self.domains.interpolate_4x(&a7)
     }
-
-
 }
-
-
 
 impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
     pub fn evaluate_register_polynomials(&self, point: F) -> (F, F) {
@@ -394,12 +405,11 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
 mod tests {
     type TestDomain = crate::Radix2DomainSet<ark_bw6_761::Fr>;
     type TestDomains = crate::domains::Domains<ark_bw6_761::Fr, TestDomain>;
+    use ark_bw6_761::Fr;
+    use ark_ff::One;
     use ark_poly::Polynomial;
     use ark_std::{test_rng, UniformRand};
-    use ark_bw6_761::Fr;
 
-    use crate::domain::{DomainSet, FftDomain};
-use crate::domains::{Domains, Evals};
     use crate::test_helpers::_random_bits;
 
     use super::*;
@@ -408,7 +418,8 @@ use crate::domains::{Domains, Evals};
     fn test_multipacking_mask_register() {
         let r = Fr::rand(&mut test_rng());
         let two = Fr::from(2u8);
-        let multipacking_mask = BitmaskPackingRegisters::<Fr, TestDomain>::build_multipacking_mask_register(4, 2, r);
+        let multipacking_mask =
+            BitmaskPackingRegisters::<Fr, TestDomain>::build_multipacking_mask_register(4, 2, r);
         assert_eq!(multipacking_mask, vec![Fr::one(), two, r, r * two]);
     }
 
@@ -417,8 +428,14 @@ use crate::domains::{Domains, Evals};
         let from_u8_vec = |v: [u8; 4]| v.iter().map(|&x| Fr::from(x)).collect::<Vec<Fr>>();
         let a = from_u8_vec([1, 2, 3, 4]);
         let b = from_u8_vec([5, 6, 7, 8]);
-        let partial_inner_product = BitmaskPackingRegisters::<Fr, TestDomain>::build_partial_inner_products_register(4, &a, &b);
-        assert_eq!(partial_inner_product, from_u8_vec([0, 1 * 5, 1 * 5 + 2 * 6, 1 * 5 + 2 * 6 + 3 * 7]));
+        let partial_inner_product =
+            BitmaskPackingRegisters::<Fr, TestDomain>::build_partial_inner_products_register(
+                4, &a, &b,
+            );
+        assert_eq!(
+            partial_inner_product,
+            from_u8_vec([0, 1 * 5, 1 * 5 + 2 * 6, 1 * 5 + 2 * 6 + 3 * 7])
+        );
     }
 
     #[test]
@@ -431,11 +448,7 @@ use crate::domains::{Domains, Evals};
         let bitmask = Bitmask::from_bits(&_random_bits(m, 0.5, rng));
 
         let r = Fr::rand(rng);
-        let acc_registers = BitmaskPackingRegisters::new(
-            domains.clone(),
-            &bitmask,
-            r
-        );
+        let acc_registers = BitmaskPackingRegisters::new(domains.clone(), &bitmask, r);
         let constraint_poly = acc_registers.compute_multipacking_mask_constraint_polynomial();
         assert_eq!(constraint_poly.degree(), 2 * n - 2);
         assert!(domains.is_zero(&constraint_poly));

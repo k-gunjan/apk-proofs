@@ -1,9 +1,8 @@
-use ark_ec::{CurveGroup, pairing::Pairing};
-use ark_poly::{EvaluationDomain, Polynomial};
-use w3f_pcs::pcs::{PCS, PcsParams};
+use ark_ec::CurveGroup;
+use ark_poly::Polynomial;
 use merlin::Transcript;
+use w3f_pcs::pcs::{PcsParams, PCS};
 
-use crate::{AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof};
 use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
 use crate::piop::basic::BasicRegisterBuilder;
@@ -12,7 +11,10 @@ use crate::piop::packed::PackedRegisterBuilder;
 use crate::piop::ProverProtocol;
 use crate::piop::RegisterPolynomials;
 use crate::transcript::ApkTranscript;
-
+use crate::{
+    AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset,
+    KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
+};
 
 pub struct Prover<IC, OC, S, D>
 where
@@ -47,8 +49,15 @@ where
         let domains = Domains::from_set(keyset.domains.clone());
 
         // assert!(kzg_params.fits(keyset.domain().size())); // SRS contains enough elements
-        <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(&mut empty_transcript, keyset.domain(), &pcs_params.raw_vk());
-        <Transcript as ApkTranscript<OC::ScalarField>>::set_keyset_commitment(&mut empty_transcript, keyset_comm);
+        <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(
+            &mut empty_transcript,
+            keyset.domain(),
+            &pcs_params.raw_vk(),
+        );
+        <Transcript as ApkTranscript<OC::ScalarField>>::set_keyset_commitment(
+            &mut empty_transcript,
+            keyset_comm,
+        );
 
         keyset.amplify();
 
@@ -60,25 +69,30 @@ where
         }
     }
 
-    pub fn prove_simple(&self, bitmask: Bitmask) -> (
+    pub fn prove_simple(
+        &self,
+        bitmask: Bitmask,
+    ) -> (
         SimpleProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
-        AccountablePublicInput<IC>) {
+        AccountablePublicInput<IC>,
+    ) {
         self.prove::<BasicRegisterBuilder<OC::ScalarField, D>>(bitmask)
     }
 
-
-        pub fn prove_counting(
-        &self, 
-        bitmask: Bitmask
+    pub fn prove_counting(
+        &self,
+        bitmask: Bitmask,
     ) -> (
         CountingProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
-        CountingPublicInput<IC>
+        CountingPublicInput<IC>,
     ) {
         self.prove::<CountingScheme<OC::ScalarField, D>>(bitmask)
     }
 
-
-    fn prove<P>(&self, bitmask: Bitmask) -> (
+    fn prove<P>(
+        &self,
+        bitmask: Bitmask,
+    ) -> (
         Proof<
             OC::ScalarField,
             P::E,
@@ -87,7 +101,7 @@ where
             S::C,
             S::Proof,
         >,
-        P::PI
+        P::PI,
     )
     where
         P: ProverProtocol<IC, OC, S, D>,
@@ -99,45 +113,66 @@ where
 
         let mut transcript = self.preprocessed_transcript.clone();
         let public_input = P::PI::new(&apk, &bitmask);
-        <Transcript as ApkTranscript<OC::ScalarField>>::append_public_input(&mut transcript, &public_input);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_public_input(
+            &mut transcript,
+            &public_input,
+        );
 
         // 1. Compute and commit to the basic registers.
         let mut protocol = P::init(self.domains.clone(), bitmask, self.keyset.clone());
         let partial_sums_polynomials = protocol.get_register_polynomials_to_commit1();
-        let partial_sums_commitments = partial_sums_polynomials.commit(
-            |p| S::commit(&self.committer_key, &p).unwrap().to_affine()
-        );
+        let partial_sums_commitments = partial_sums_polynomials
+            .commit(|p| S::commit(&self.committer_key, &p).unwrap().to_affine());
 
-         <Transcript as ApkTranscript<OC::ScalarField>>::append_register_commitments(&mut transcript, &partial_sums_commitments);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_register_commitments(
+            &mut transcript,
+            &partial_sums_commitments,
+        );
 
         // 2. Receive bitmask aggregation challenge,
         // compute and commit to succinct accountability registers.
-        let r = <Transcript as ApkTranscript<OC::ScalarField>>::get_bitmask_aggregation_challenge(&mut transcript);
+        let r = <Transcript as ApkTranscript<OC::ScalarField>>::get_bitmask_aggregation_challenge(
+            &mut transcript,
+        );
         // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
-        let acc_register_commitments = acc_register_polynomials.commit(
-            |p| S::commit(&self.committer_key, &p).unwrap().to_affine()
+        let acc_register_commitments = acc_register_polynomials
+            .commit(|p| S::commit(&self.committer_key, &p).unwrap().to_affine());
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_2nd_round_register_commitments(
+            &mut transcript,
+            &acc_register_commitments,
         );
-        <Transcript as ApkTranscript<OC::ScalarField>>::append_2nd_round_register_commitments(&mut transcript, &acc_register_commitments);
 
         // 3. Receive constraint aggregation challenge,
         // compute and commit to the quotient polynomial.
-        let phi = <Transcript as ApkTranscript<OC::ScalarField>>::get_constraints_aggregation_challenge(&mut transcript);
+        let phi =
+            <Transcript as ApkTranscript<OC::ScalarField>>::get_constraints_aggregation_challenge(
+                &mut transcript,
+            );
         let q_poly = protocol.compute_quotient_polynomial(phi, self.keyset.domain());
         let q_comm = S::commit(&self.committer_key, &q_poly).unwrap();
-        <Transcript as ApkTranscript<OC::ScalarField>>::append_quotient_commitment(&mut transcript, &q_comm);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_quotient_commitment(
+            &mut transcript,
+            &q_comm,
+        );
 
         // 4. Receive the evaluation point,
         // evaluate register polynomials and the quotient polynomial,
         // compute the linearization polynomial and evaluate it at the shifted evaluation point,
         // commit to all the evaluations.
-        let zeta = <Transcript as ApkTranscript<OC::ScalarField>>::get_evaluation_point(&mut transcript);
+        let zeta =
+            <Transcript as ApkTranscript<OC::ScalarField>>::get_evaluation_point(&mut transcript);
         let register_evaluations = protocol.evaluate_register_polynomials(zeta);
         let q_zeta = q_poly.evaluate(&zeta);
         let zeta_omega = zeta * self.keyset.domain().generator();
         let r_poly = protocol.compute_linearization_polynomial(phi, zeta);
         let r_zeta_omega = r_poly.evaluate(&zeta_omega);
-         <Transcript as ApkTranscript<OC::ScalarField>>::append_evaluations(&mut transcript, &register_evaluations, &q_zeta, &r_zeta_omega);
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_evaluations(
+            &mut transcript,
+            &register_evaluations,
+            &q_zeta,
+            &r_zeta_omega,
+        );
 
         // 5. Receive the polynomials aggregation challenge,
         // open the aggregated polynomial at the evaluation point,
@@ -145,10 +180,15 @@ where
         // and commit to the opening proofs.
         let mut register_polynomials = protocol.get_register_polynomials_to_open();
         register_polynomials.push(q_poly);
-        let nus =  <Transcript as ApkTranscript<OC::ScalarField>>::get_kzg_aggregation_challenges(&mut transcript, register_polynomials.len());
+        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_kzg_aggregation_challenges(
+            &mut transcript,
+            register_polynomials.len(),
+        );
         let w_poly = w3f_pcs::aggregation::single::aggregate_polys(&register_polynomials, &nus);
-        let w_at_zeta_proof = S::open(&self.committer_key, &w_poly, zeta).expect("opening zeta proof failed");
-        let r_at_zeta_omega_proof = S::open(&self.committer_key, &r_poly, zeta_omega).expect("opening zeta omega proof failed");
+        let w_at_zeta_proof =
+            S::open(&self.committer_key, &w_poly, zeta).expect("opening zeta proof failed");
+        let r_at_zeta_omega_proof = S::open(&self.committer_key, &r_poly, zeta_omega)
+            .expect("opening zeta omega proof failed");
 
         // Finally, compose the proof.
         let proof = Proof {

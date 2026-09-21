@@ -1,7 +1,7 @@
 use ark_ff::PrimeField;
+use ark_std::convert::TryInto;
 use num_bigint::BigUint;
 use num_integer::Integer;
-use ark_std::convert::TryInto;
 
 use super::types::FftDomain;
 
@@ -46,8 +46,16 @@ impl<F: PrimeField> NaiveDomain<F> {
         let w = subgroup_generator::<F>(size)?;
         let w_inv = w.inverse()?;
         let size_inv = F::from(size as u64).inverse()?;
-        debug_assert!(w.pow([size as u64]).is_one(), "generator has the wrong order");
-        Some(NaiveDomain { size, w, w_inv, size_inv })
+        debug_assert!(
+            w.pow([size as u64]).is_one(),
+            "generator has the wrong order"
+        );
+        Some(NaiveDomain {
+            size,
+            w,
+            w_inv,
+            size_inv,
+        })
     }
 
     /// Evaluates `coeffs` at `1, g, g^2, ..., g^(size-1)` by Horner, one point at a time.
@@ -98,7 +106,11 @@ impl<F: PrimeField> FftDomain<F> for NaiveDomain<F> {
     }
 
     fn interpolate(&self, evals: &[F]) -> Vec<F> {
-        assert_eq!(evals.len(), self.size, "interpolation needs exactly `size` evaluations");
+        assert_eq!(
+            evals.len(),
+            self.size,
+            "interpolation needs exactly `size` evaluations"
+        );
         let mut coeffs = self.evaluate_at_powers(evals, self.w_inv);
         coeffs.iter_mut().for_each(|c| *c *= self.size_inv);
         coeffs
@@ -167,7 +179,11 @@ mod tests {
         let rng = &mut test_rng();
         let small = NaiveDomain::<Fr767>::new(253).unwrap(); // 11 * 23
         let large = NaiveDomain::<Fr767>::new(1551).unwrap(); // 3 * 11 * 47, and 1551 >= 4*253 - 2
-        assert_ne!(large.size() % small.size(), 0, "the pair must not be nested");
+        assert_ne!(
+            large.size() % small.size(),
+            0,
+            "the pair must not be nested"
+        );
 
         let evals: Vec<Fr767> = (0..small.size()).map(|_| Fr767::rand(rng)).collect();
         let coeffs = small.interpolate(&evals);
