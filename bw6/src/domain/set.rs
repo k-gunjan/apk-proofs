@@ -4,10 +4,12 @@
 //! hold products of register polynomials in evaluation form. The constraint polynomial has
 //! degree up to `4n - 3`, so recovering it takes at least `4n - 2` evaluations.
 //!
-//! What the three sizes *are* is the only thing that differs between the two configurations, so
-//! it is the only thing this trait leaves open. Everything downstream — [`crate::Keyset`],
-//! [`crate::domains::Domains`], the PIOP, the prover and the verifier — carries a single
-//! `D: DomainSet` parameter and never asks which curve it is on.
+//! The protocol's demand on the two larger domains is only capacity — `2n - 1` and `4n - 2`
+//! points — and that is all this module states. Which sizes a field actually offers, and how it
+//! reaches them from `n`, is left to the [`DomainSizes`] table the configuration supplies.
+//! Everything downstream — [`crate::Keyset`], [`crate::domains::Domains`], the PIOP, the prover
+//! and the verifier — carries a single `D: DomainSet` parameter and never asks which curve it
+//! is on.
 
 use ark_ff::PrimeField;
 use ark_poly::univariate::DensePolynomial;
@@ -17,6 +19,35 @@ use super::cooley_tukey::CooleyTukeyDomain;
 use super::naive::subgroup_generator;
 use super::radix2::Radix2Domain;
 use super::types::{DomainError, FftDomain, SupportsPackedScheme};
+
+/// The three domain sizes one proof is computed over.
+///
+/// `base` is the trace domain `H`. The other two hold products of register polynomials in
+/// evaluation form, and the protocol's only demand on them is capacity: the constraint
+/// polynomials reach degree `2n - 2` and `4n - 3`, so recovering them takes `2n - 1` and
+/// `4n - 2` evaluations. Anything at or above those is correct. Which sizes a field actually
+/// offers, and which of them are worth choosing, is not the protocol's business.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct DomainTriple {
+    /// The trace domain `H`, of size `n`.
+    pub base: usize,
+    /// Holds at least `2n - 1` points.
+    pub medium: usize,
+    /// Holds at least `4n - 2` points.
+    pub large: usize,
+}
+
+impl DomainTriple {
+    pub const fn new(base: usize, medium: usize, large: usize) -> Self {
+        DomainTriple { base, medium, large }
+    }
+
+    /// The protocol invariant, in one place. Both bounds are floors, not targets: a domain set
+    /// is free to overshoot them, and on a field whose subgroup orders are sparse it must.
+    pub const fn meets_protocol_bounds(&self) -> bool {
+        self.base >= 1 && self.medium >= 2 * self.base - 1 && self.large >= 4 * self.base - 2
+    }
+}
 
 /// The three domains a proof is computed over, chosen together.
 ///
@@ -78,20 +109,56 @@ pub trait DomainSet<F: PrimeField>: Clone + Sized {
     /// of the register `p` interpolates, which the affine-addition constraints need in order to
     /// relate consecutive rows.
     ///
-    /// The default works for any triple at all: `p(Xw)` has coefficients `c_i w^i`, so scaling
-    /// the coefficients and transforming once more is always correct. Implementations whose
-    /// domains are nested override it with a rotation, which is free; the two are checked
-    /// against each other in the tests.
-    fn shift_over_large(&self, poly: &DensePolynomial<F>, _evals_over_large: &[F]) -> Vec<F> {
-        let mut coeffs = poly.coeffs.clone();
-        let mut power = F::one();
-        let w = self.base().generator();
-        for c in coeffs.iter_mut() {
-            *c *= power;
-            power *= w;
-        }
-        self.large().fft(&coeffs)
+    /// Derived from the sizes rather than configured: a rotation when the domains nest, a
+    /// coefficient scaling and one extra transform when they do not. No implementation here
+    /// overrides it, and one that did would be claiming to know something about its domains
+    /// that their sizes do not already say.
+    fn shift_over_large(&self, poly: &DensePolynomial<F>, evals_over_large: &[F]) -> Vec<F> {
+        shifted_evals(self.base(), self.large(), poly, evals_over_large)
     }
+}
+
+/// Evaluations over `large` of `p(Xw)`, where `w` generates `small`.
+///
+/// When the domains nest — `|large| = k * |small|` with `w_L^k = w` — this is a rotation of the
+/// evaluation vector by `k`, and costs nothing: `p(w_L^{i+k}) = p(w_L^i * w)`. Otherwise `p(Xw)`
+/// is formed in coefficient form, where it is `sum_i (c_i w^i) X^i`, and transformed. That is
+/// always correct but costs one extra FFT over the largest domain the protocol uses.
+///
+/// Which branch applies follows from the two sizes, so no domain set has to declare it. The
+/// nesting relation itself is `debug_assert`ed rather than re-derived in release: both domain
+/// families here generate their subgroups as `GENERATOR^((q-1)/n)`, under which divisibility of
+/// the sizes implies it, and checking would mean a field exponentiation on a path the prover
+/// takes once per register.
+pub(crate) fn shifted_evals<F: PrimeField, D: FftDomain<F>>(
+    small: &D,
+    large: &D,
+    poly: &DensePolynomial<F>,
+    evals_over_large: &[F],
+) -> Vec<F> {
+    let (n, m) = (small.size(), large.size());
+    if n > 0 && m % n == 0 {
+        let k = m / n;
+        debug_assert_eq!(
+            nesting_index(small, large),
+            Some(k),
+            "sizes {} and {} divide but the domains do not nest",
+            n,
+            m
+        );
+        let mut shifted = evals_over_large.to_vec();
+        shifted.rotate_left(k);
+        return shifted;
+    }
+
+    let mut coeffs = poly.coeffs.clone();
+    let mut power = F::one();
+    let w = small.generator();
+    for c in coeffs.iter_mut() {
+        *c *= power;
+        power *= w;
+    }
+    large.fft(&coeffs)
 }
 
 /// `k` such that `large.element(k) == small.generator()`, when `small` sits inside `large` with
@@ -160,39 +227,38 @@ impl<F: PrimeField> DomainSet<F> for Radix2DomainSet<F> {
         }
         Ok(base)
     }
-
-    /// `|large| = 4|base|` and the domains are nested, so `p(w_L^{i+4}) = p(w_L^i w)`: the shift
-    /// is a rotation of the evaluation vector by four, and costs nothing.
-    fn shift_over_large(&self, _poly: &DensePolynomial<F>, evals_over_large: &[F]) -> Vec<F> {
-        debug_assert_eq!(nesting_index(&self.base, &self.large), Some(4));
-        let mut shifted = evals_over_large.to_vec();
-        shifted.rotate_left(4);
-        shifted
-    }
 }
 
 /// Radix-2 sizes from 256 up are all multiples of 256, which is what `packed` needs.
 impl<F: PrimeField> SupportsPackedScheme for Radix2DomainSet<F> {}
 
 // -------------------------------------------------------------------------------------------
-// APK-381
+// Mixed-radix: fields without the two-adicity for radix-2
 // -------------------------------------------------------------------------------------------
 
-/// A precomputed, ascending list of base domain sizes for one field.
+/// A field's precomputed answer to "which domains should a trace of `min_size` rows use?".
 ///
-/// The list is a property of the field's multiplicative order, worked out once and written down,
-/// so that choosing a domain is just a binary search. A list worked out for one field cannot be 
-/// handed to a `SmoothDomainSet` over another. That the entries really are subgroup orders of `F` 
-/// is not something the type system can check, so it is asserted where the list is written 
-/// down - see the tests in [`crate::instances::bls12_381_bw6_767`] — and re-checked by 
-/// `debug_assert` wherever a domain is built from one.
+/// The implementor owns both the storage and the reading: a list of base sizes expanded by some
+/// rule, a list of `(base, medium, large)` tuples read straight off, whatever suits the field's
+/// multiplicative order. Working it out once and writing it down is the point — deriving it at
+/// run time would mean a modular exponentiation per candidate, paid on every keyset, prover and
+/// verifier, to recompute a constant.
+///
+/// All this trait asks of the answer is [`DomainTriple::meets_protocol_bounds`] and that all
+/// three sizes be subgroup orders of `F`. Neither is checkable by the type system, so both are
+/// asserted where the table is written down and `debug_assert`ed wherever a set is built.
+///
+/// `F` is a parameter so a table worked out for one field cannot be attached to another.
 pub trait DomainSizes<F: PrimeField>: 'static {
-    /// Base domain sizes, strictly ascending. Each `n` must satisfy `6n | q - 1`, since
-    /// [`SmoothDomainSet`] expands it to the triple `n, 2n, 6n`.
-    const SIZES: &'static [usize];
+    /// The triple for a trace of at least `min_size` rows, or `None` when the field has nothing
+    /// that large. `base` is rounded **up**, so callers must read back what they got.
+    ///
+    /// Must be deterministic: the prover and the verifier resolve the same request
+    /// independently and have to land on the same domains.
+    fn triple_for(min_size: usize) -> Option<DomainTriple>;
 }
 
-/// Mixed-radix domains `n, 2n, 6n` drawn from `S`. Used by APK-381.
+/// Mixed-radix domains, with the sizes supplied by `S`. Used by APK-381.
 pub struct SmoothDomainSet<F: PrimeField, S: DomainSizes<F>> {
     base: CooleyTukeyDomain<F>,
     medium: CooleyTukeyDomain<F>,
@@ -224,39 +290,31 @@ impl<F: PrimeField, S: DomainSizes<F>> core::fmt::Debug for SmoothDomainSet<F, S
 }
 
 impl<F: PrimeField, S: DomainSizes<F>> SmoothDomainSet<F, S> {
-    /// The table entry a request for `min_size` resolves to: simply the first one big enough.
+    /// Builds the three transforms for sizes `S` has already chosen.
     ///
-    /// A plain binary search is cost-optimal only because the list is already filtered — whoever
-    /// writes one down omits any size that a larger entry beats outright, which is what makes
-    /// transform cost increase with size. It is also why nothing here consults the field: the
-    /// list is taken as given, and `build` is where a size that this field cannot realise turns
-    /// into an error.
-    ///
-    /// Sole source of truth for which size a request maps to, so the prover's triple and the
-    /// verifier's single domain cannot drift apart.
-    fn select_size(min_size: usize) -> Result<usize, DomainError> {
-        let first = S::SIZES.partition_point(|&n| n < min_size);
-        S::SIZES.get(first).copied().ok_or(DomainError::TooLarge {
-            requested: min_size,
-        })
-    }
-
-    fn build(n: usize) -> Result<Self, DomainError> {
-        // The `DomainSizes` contract, checked where it is relied on but kept off the hot path:
-        // a list paired with the wrong field, or one entry mistyped, shows up here in every
-        // debug and test build rather than as a confusing `TooLarge` at run time.
+    /// The two `debug_assert`s are the `DomainSizes` contract, checked where it is relied on but
+    /// kept off the hot path: a table paired with the wrong field, or one entry mistyped, names
+    /// itself here in every debug and test build rather than surfacing as a confusing
+    /// `TooLarge` at run time.
+    fn build(sizes: DomainTriple) -> Result<Self, DomainError> {
         debug_assert!(
-            subgroup_generator::<F>(6 * n).is_some(),
-            "{} is in the size list but 6 * {} does not divide this field's q - 1",
-            n,
-            n
+            sizes.meets_protocol_bounds(),
+            "{:?} is too small to hold the constraint polynomials",
+            sizes
+        );
+        debug_assert!(
+            [sizes.base, sizes.medium, sizes.large]
+                .iter()
+                .all(|&n| subgroup_generator::<F>(n).is_some()),
+            "{:?} names a size that is not a subgroup order of this field",
+            sizes
         );
 
-        let missing = || DomainError::TooLarge { requested: n };
+        let missing = |n| move || DomainError::TooLarge { requested: n };
         Ok(SmoothDomainSet {
-            base: CooleyTukeyDomain::new(n).ok_or_else(missing)?,
-            medium: CooleyTukeyDomain::new(2 * n).ok_or_else(missing)?,
-            large: CooleyTukeyDomain::new(6 * n).ok_or_else(missing)?,
+            base: CooleyTukeyDomain::new(sizes.base).ok_or_else(missing(sizes.base))?,
+            medium: CooleyTukeyDomain::new(sizes.medium).ok_or_else(missing(sizes.medium))?,
+            large: CooleyTukeyDomain::new(sizes.large).ok_or_else(missing(sizes.large))?,
             _sizes: PhantomData,
         })
     }
@@ -265,18 +323,20 @@ impl<F: PrimeField, S: DomainSizes<F>> SmoothDomainSet<F, S> {
 impl<F: PrimeField, S: DomainSizes<F>> DomainSet<F> for SmoothDomainSet<F, S> {
     type Domain = CooleyTukeyDomain<F>;
 
-    /// The first entry of `S` at least `min_size`. Which entries exist, and which were left
-    /// out for being dominated, is the size list's business.
+    /// Whatever `S` answers. Which sizes exist, and how the two larger ones are derived from
+    /// the base, is entirely the table's business.
     fn for_min_size(min_size: usize) -> Result<Self, DomainError> {
-        Self::build(Self::select_size(min_size)?)
+        Self::build(S::triple_for(min_size).ok_or(DomainError::TooLarge {
+            requested: min_size,
+        })?)
     }
 
     fn base_for_exact_size(size: usize) -> Result<CooleyTukeyDomain<F>, DomainError> {
-        let selected = Self::select_size(size)?;
-        if selected != size {
+        let chosen = S::triple_for(size).ok_or(DomainError::TooLarge { requested: size })?;
+        if chosen.base != size {
             return Err(DomainError::NotExact {
                 requested: size,
-                nearest: selected,
+                nearest: chosen.base,
             });
         }
         CooleyTukeyDomain::new(size).ok_or(DomainError::TooLarge { requested: size })
@@ -293,24 +353,12 @@ impl<F: PrimeField, S: DomainSizes<F>> DomainSet<F> for SmoothDomainSet<F, S> {
     fn large(&self) -> &CooleyTukeyDomain<F> {
         &self.large
     }
-
-    /// `|large| = 6|base|`, and reserving the factors 2 and 3 is exactly what makes that hold —
-    /// so the domains nest and the shift is a rotation by six, not an extra transform.
-    ///
-    /// This is the payoff for the padding the table costs. Without nesting the shift would need
-    /// a coefficient scaling and a further `6n`-point FFT, which is the most expensive transform
-    /// the prover performs.
-    fn shift_over_large(&self, _poly: &DensePolynomial<F>, evals_over_large: &[F]) -> Vec<F> {
-        debug_assert_eq!(nesting_index(&self.base, &self.large), Some(6));
-        let mut shifted = evals_over_large.to_vec();
-        shifted.rotate_left(6);
-        shifted
-    }
 }
 
 /// Deliberately **not** `impl SupportsPackedScheme for SmoothDomainSet`: `packed` splits the
-/// bitmask into 256-bit chunks and needs `256 | n`. Over BW6-767 that is impossible — `q - 1`
-/// carries a single factor of 2, so no domain size there is even a multiple of 4.
+/// bitmask into 256-bit chunks and so needs `256 | n`, which a table of arbitrary subgroup
+/// orders cannot promise. On BW6-767, the field this exists for, it is outright impossible —
+/// `q - 1` carries a single factor of 2, so no domain size there is even a multiple of 4.
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -322,24 +370,45 @@ mod tests {
     // The mechanism is generic, but exercising it needs a concrete size list, so these tests
     // borrow APK-381's. Whether that list is *correct* for BW6-767 is asserted next to the list
     // itself, in `instances::bls12_381_bw6_767`.
-    use crate::instances::bls12_381_bw6_767::APK381_DOMAIN_SIZES;
+    use crate::instances::bls12_381_bw6_767::{Apk381DomainSizes, APK381_DOMAIN_SIZES};
 
     type Smooth = crate::instances::bls12_381_bw6_767::Domains767;
     type Radix2 = Radix2DomainSet<Fr761>;
 
-    /// What the PIOP actually requires of the triple, for every entry the field admits.
+    /// What the PIOP requires of a triple, whatever the table chose. The expansion rule is not
+    /// asserted here — by what factor a table overshoots the floors is its own business, and
+    /// APK-381's answer is pinned in its own module.
     #[test]
-    fn every_triple_is_large_enough_and_nested() {
-        // Building all 32 means transforming plans for domains in the hundreds of millions.
-        // The protocol's requirements are structural, so the small end proves them.
+    fn every_triple_meets_the_protocol_bounds_and_nests() {
+        // Building all 30 means transform plans for domains in the hundreds of millions. The
+        // requirements are structural, so the small end proves them.
         for &n in APK381_DOMAIN_SIZES.iter().take(12) {
-            let set = Smooth::build(n).expect("entry must be constructible");
+            let sizes = <Apk381DomainSizes as DomainSizes<Fr767>>::triple_for(n)
+                .expect("an entry must resolve to itself");
+            assert_eq!(sizes.base, n);
+            assert!(sizes.meets_protocol_bounds(), "{:?}", sizes);
+
+            let set = Smooth::build(sizes).expect("entry must be constructible");
             assert_eq!(set.base().size(), n);
             assert!(set.medium().size() >= 2 * n - 1);
             assert!(set.large().size() >= 4 * n - 2);
-            assert_eq!(nesting_index(set.base(), set.medium()), Some(2));
-            assert_eq!(nesting_index(set.base(), set.large()), Some(6));
+
+            // Nested, which is what makes `shifted_evals` take the rotation branch. At what
+            // index is the table's choice, not the protocol's.
+            assert!(nesting_index(set.base(), set.medium()).is_some());
+            assert!(nesting_index(set.base(), set.large()).is_some());
         }
+    }
+
+    /// The floors are floors: a triple below either one is rejected, at or above is accepted.
+    #[test]
+    fn protocol_bounds_are_the_degree_bounds_of_the_constraint_polynomials() {
+        let n = 16;
+        assert!(DomainTriple::new(n, 2 * n - 1, 4 * n - 2).meets_protocol_bounds());
+        assert!(!DomainTriple::new(n, 2 * n - 2, 4 * n - 2).meets_protocol_bounds());
+        assert!(!DomainTriple::new(n, 2 * n - 1, 4 * n - 3).meets_protocol_bounds());
+        // Overshooting is fine, and on a sparse field unavoidable.
+        assert!(DomainTriple::new(n, 2 * n, 6 * n).meets_protocol_bounds());
     }
 
     /// The selector returns the first entry at least as large as requested...
@@ -472,13 +541,15 @@ mod tests {
     /// and must not run in a release prover or verifier.
     #[test]
     #[cfg(debug_assertions)]
-    #[should_panic(expected = "does not divide this field's q - 1")]
+    #[should_panic(expected = "not a subgroup order of this field")]
     fn a_size_list_that_the_field_cannot_realise_trips_the_debug_assert() {
         struct WrongForThisField;
         impl DomainSizes<Fr767> for WrongForThisField {
-            // A power of two. BW6-767's scalar field has two-adicity 1, so no such subgroup
-            // exists there; this list belongs to a radix-2 field.
-            const SIZES: &'static [usize] = &[256];
+            fn triple_for(_min_size: usize) -> Option<DomainTriple> {
+                // Powers of two. BW6-767's scalar field has two-adicity 1, so no such subgroup
+                // exists there; this table belongs to a radix-2 field.
+                Some(DomainTriple::new(256, 512, 1024))
+            }
         }
 
         let _ = SmoothDomainSet::<Fr767, WrongForThisField>::for_min_size(200);
@@ -494,11 +565,4 @@ mod tests {
         assert_eq!(nesting_index(set.base(), set.large()), Some(4));
     }
 
-    /// No BW6-767 domain is a multiple of 4, which is why `packed` is unavailable there.
-    #[test]
-    fn no_smooth_size_is_a_multiple_of_four() {
-        for &n in APK381_DOMAIN_SIZES {
-            assert_ne!(6 * n % 4, 0, "6 * {} is a multiple of 4", n);
-        }
-    }
 }

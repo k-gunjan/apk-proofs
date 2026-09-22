@@ -69,7 +69,7 @@ impl_pointwise_op!(Mul, mul, MulAssign, mul_assign, *=);
 /// which is the `DomainSet` contract and what `new` re-asserts.
 #[derive(Clone)]
 pub struct Domains<F: PrimeField, D: DomainSet<F>> {
-    /// The triple, and the curve-specific shift that goes with it.
+    /// The three domains, and the shift derived from their sizes.
     domains: D,
 
     /// First Lagrange basis polynomial L_0 of degree n evaluated over the large domain; L_0(\omega^0) = 1
@@ -214,9 +214,9 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
     /// Evaluations of `p(Xw)` over the 4x domain, given `p` and its evaluations there.
     ///
     /// `p(Xw)` represents the left circular shift of the register `p` interpolates, which the
-    /// affine-addition constraints need to relate consecutive rows. How it is computed is the
-    /// one genuinely curve-specific step in the PIOP, so it is delegated to the domain set; see
-    /// [`DomainSet::shift_over_large`].
+    /// affine-addition constraints need to relate consecutive rows. Whether that is a free
+    /// rotation or an extra transform follows from how the two domains' sizes relate, so it is
+    /// delegated to the domain set; see [`DomainSet::shift_over_large`].
     pub fn shift_over_4x(&self, poly: &DensePolynomial<F>, evals_over_4x: &Evals<F>) -> Evals<F> {
         self.domains
             .shift_over_large(poly, &evals_over_4x.evals)

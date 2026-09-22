@@ -23,5 +23,5 @@ pub use cooley_tukey::CooleyTukeyDomain;
 pub use naive::{subgroup_generator, NaiveDomain};
 pub use radix2::Radix2Domain;
 pub(crate) use set::nesting_index;
-pub use set::{DomainSet, DomainSizes, Radix2DomainSet, SmoothDomainSet};
+pub use set::{DomainSet, DomainSizes, DomainTriple, Radix2DomainSet, SmoothDomainSet};
 pub use types::{DomainError, FftDomain, SupportsPackedScheme};

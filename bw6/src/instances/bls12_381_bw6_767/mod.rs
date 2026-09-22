@@ -147,11 +147,28 @@ pub const APK381_DOMAIN_SIZES: &[usize] = &[
     363044121, // 3 * 11 * 23 * 47 * 10177
 ];
 
-/// Binds [`APK381_DOMAIN_SIZES`] to BW6-767's scalar field.
+/// Binds [`APK381_DOMAIN_SIZES`] to BW6-767's scalar field, and expands a base size to the
+/// triple the protocol needs.
 pub struct Apk381DomainSizes;
 
 impl crate::DomainSizes<OuterScalar> for Apk381DomainSizes {
-    const SIZES: &'static [usize] = APK381_DOMAIN_SIZES;
+    /// Reads the base size off [`APK381_DOMAIN_SIZES`] and expands it to `n, 2n, 6n`.
+    ///
+    /// `2n` and `6n` rather than the protocol's bare floors of `2n - 1` and `4n - 2` because
+    /// these are the sizes this field actually has. One factor of 2 and one of 3 are held back
+    /// out of `q - 1` when the table is built, precisely so that `2n` and `6n` remain subgroup
+    /// orders for every entry. They clear the floors with room to spare — `2n >= 2n - 1` and
+    /// `6n >= 4n - 2` — and, being whole multiples of `n`, they nest, which is what lets the
+    /// shifted register be a rotation of the evaluation vector rather than an extra transform
+    /// over the largest domain in the protocol.
+    ///
+    /// A field with a different factorisation would answer differently, and nothing above this
+    /// function knows or cares which numbers come back.
+    fn triple_for(min_size: usize) -> Option<crate::DomainTriple> {
+        let i = APK381_DOMAIN_SIZES.partition_point(|&n| n < min_size);
+        let n = *APK381_DOMAIN_SIZES.get(i)?;
+        Some(crate::DomainTriple::new(n, 2 * n, 6 * n))
+    }
 }
 
 /// Evaluation domains for BW6-767's scalar field.
@@ -217,6 +234,7 @@ pub const U: &[u64] = ark_bls12_381::Config::X;
 mod tests {
     use super::*;
     use crate::domain::subgroup_generator;
+    use crate::{DomainSizes, DomainTriple};
     use num_bigint::BigUint;
 
     /// The list is the reserved-factor rule made explicit: every entry divides
@@ -275,15 +293,51 @@ mod tests {
             2 * 9 * 11 * 23 * 47 * 10177,
             "the largest triple should exhaust the smooth part of q - 1"
         );
-        // ...and each `6n` really is a subgroup order of this field. This is the `DomainSizes`
-        // contract that `SmoothDomainSet::build` only `debug_assert`s, so that the production
-        // path does a binary search and nothing else. Asserting it here is what earns that.
+        // ...and every size `triple_for` hands out really is a subgroup order of this field.
+        // That is the `DomainSizes` contract, which `SmoothDomainSet::build` only
+        // `debug_assert`s so the production path stays a binary search. Asserting it here is
+        // what earns that.
         for &n in APK381_DOMAIN_SIZES {
-            assert!(
-                subgroup_generator::<OuterScalar>(6 * n).is_some(),
-                "6 * {} is not a subgroup order of BW6-767's scalar field",
-                n
-            );
+            let t = Apk381DomainSizes::triple_for(n).expect("an entry must resolve to itself");
+            for size in [t.base, t.medium, t.large] {
+                assert!(
+                    subgroup_generator::<OuterScalar>(size).is_some(),
+                    "{} is not a subgroup order of BW6-767's scalar field",
+                    size
+                );
+            }
+        }
+    }
+
+    /// The expansion rule, which is this module's choice and not the protocol's: every entry
+    /// resolves to `n, 2n, 6n`, and every such triple clears the protocol's floors.
+    #[test]
+    fn every_entry_expands_to_n_2n_6n() {
+        for &n in APK381_DOMAIN_SIZES {
+            let t = Apk381DomainSizes::triple_for(n).expect("an entry must resolve to itself");
+            assert_eq!(t, DomainTriple::new(n, 2 * n, 6 * n));
+            assert!(t.meets_protocol_bounds(), "{:?}", t);
+        }
+    }
+
+    /// A request between entries rounds up to the next one; one past the top has no answer.
+    #[test]
+    fn triple_for_rounds_up_and_runs_out() {
+        assert_eq!(Apk381DomainSizes::triple_for(254).unwrap().base, 517);
+        assert_eq!(Apk381DomainSizes::triple_for(1).unwrap().base, 1);
+        let past_the_end = APK381_DOMAIN_SIZES.last().unwrap() + 1;
+        assert_eq!(Apk381DomainSizes::triple_for(past_the_end), None);
+    }
+
+    /// No size this configuration uses is a multiple of 4, which is why the `packed` scheme is
+    /// unavailable on APK-381: it splits the bitmask into 256-bit chunks and needs `256 | n`.
+    #[test]
+    fn no_size_is_a_multiple_of_four() {
+        for &n in APK381_DOMAIN_SIZES {
+            let t = Apk381DomainSizes::triple_for(n).unwrap();
+            for size in [t.base, t.medium, t.large] {
+                assert_ne!(size % 4, 0, "{} is a multiple of 4", size);
+            }
         }
     }
 }

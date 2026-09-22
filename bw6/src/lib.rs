@@ -35,8 +35,8 @@ pub use config::{
     PcsParamsOf, ProverOf, ScalarOf, SimpleProofOf, VerifierOf,
 };
 pub use domain::{
-    CooleyTukeyDomain, DomainError, DomainSet, DomainSizes, FftDomain, NaiveDomain,
-    Radix2Domain, Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme,
+    CooleyTukeyDomain, DomainError, DomainSet, DomainSizes, DomainTriple, FftDomain,
+    NaiveDomain, Radix2Domain, Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme,
 };
 
 mod transcript;
