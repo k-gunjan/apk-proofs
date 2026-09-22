@@ -326,7 +326,7 @@ where
             &proof.q_zeta,
             &proof.r_zeta_omega,
         );
-        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_kzg_aggregation_challenges(
+        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_opening_aggregation_challenges(
             &mut transcript,
             batch_size,
         );

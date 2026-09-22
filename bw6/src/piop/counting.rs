@@ -244,7 +244,7 @@ mod tests {
         let n = 16;
         let m = n - 1;
 
-        let kzg_params = Pcs::setup(m, rng);
+        let pcs_params = Pcs::setup(m, rng);
         let mut keyset = Keyset::<G1Projective, OuterCurve, TestDomain>::new(random_pks(m, rng));
         keyset.amplify();
 
@@ -263,7 +263,7 @@ mod tests {
             Pcs,
             TestDomain,
         >>::get_register_polynomials_to_commit1(&scheme)
-        .commit(|p| Pcs::commit(&kzg_params.ck(), &p).unwrap().0)
+        .commit(|p| Pcs::commit(&pcs_params.ck(), &p).unwrap().0)
         .as_vec();
         let actual_evaluations = <CountingScheme<Fr, TestDomain> as ProverProtocol<
             G1Projective,
@@ -288,7 +288,7 @@ mod tests {
         let expected_commitments = polynomials
             .iter()
             .skip(2) // keyset commitment is publicly known
-            .map(|p| Pcs::commit(&kzg_params.ck(), &p).unwrap().0)
+            .map(|p| Pcs::commit(&pcs_params.ck(), &p).unwrap().0)
             .collect::<Vec<_>>();
         assert_eq!(actual_commitments, expected_commitments);
     }

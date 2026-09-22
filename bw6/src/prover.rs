@@ -42,13 +42,14 @@ where
     pub fn new(
         mut keyset: Keyset<IC, OC, D>,
         keyset_comm: &KeysetCommitment<OC::ScalarField, S::C>,
-        // prover needs both KZG pk and vk, as it commits to the latter to bind the srs
+        // prover needs both the committer and the verifier key, as it commits to the latter
+        // to bind the srs
         pcs_params: S::Params,
         mut empty_transcript: Transcript,
     ) -> Self {
         let domains = Domains::from_set(keyset.domains.clone());
 
-        // assert!(kzg_params.fits(keyset.domain().size())); // SRS contains enough elements
+        // assert!(pcs_params.fits(keyset.domain().size())); // SRS contains enough elements
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(
             &mut empty_transcript,
             keyset.domain(),
@@ -180,7 +181,7 @@ where
         // and commit to the opening proofs.
         let mut register_polynomials = protocol.get_register_polynomials_to_open();
         register_polynomials.push(q_poly);
-        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_kzg_aggregation_challenges(
+        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_opening_aggregation_challenges(
             &mut transcript,
             register_polynomials.len(),
         );

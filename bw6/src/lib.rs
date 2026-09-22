@@ -61,8 +61,8 @@ pub trait CommitmentExt<F: PrimeField> {
     fn from_affine(p: Self::Affine) -> Self;
 }
 
-/// w3f-pcs's KZG commits to a curve point wrapped in [`WrappedAffine`]; this is how the rest of
-/// the crate gets the point back out without naming KZG.
+/// Commitment schemes that commit to a single curve point represent it as [`WrappedAffine`];
+/// this is how the rest of the crate gets the point back out without naming a scheme.
 impl<C: CurveGroup> CommitmentExt<C::ScalarField> for WrappedAffine<C> {
     type Affine = C::Affine;
 

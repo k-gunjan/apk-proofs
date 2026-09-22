@@ -31,9 +31,10 @@ use w3f_pcs::pcs::{CommitterKey, PCS};
 // As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
 
 // The commitment type is generic over different PCS implementations. To extract the
-// underlying curve point, access the specific implementation's inner field. For example,
-// KzgCommitment<E: Pairing> wraps the point as `pub struct KzgCommitment(pub E::G1Affine)`,
-// so the affine coordinates can be accessed via the `.0` field accessor.
+// underlying curve point, go through `CommitmentExt::to_affine` rather than reaching into the
+// concrete type: w3f-pcs's KZG, for instance, wraps the point as
+// `pub struct WrappedAffine<C: CurveGroup>(pub C::Affine)`, but nothing here should depend on
+// that.
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct KeysetCommitment<F, C>
 where
@@ -123,15 +124,15 @@ where
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
-    pub fn commit<S>(&self, kzg_pk: &S::CK) -> KeysetCommitment<OC::ScalarField, S::C>
+    pub fn commit<S>(&self, committer_key: &S::CK) -> KeysetCommitment<OC::ScalarField, S::C>
     where
         S: PCS<OC::ScalarField>,
     {
-        assert!(self.domain().size() <= kzg_pk.max_degree() + 1);
+        assert!(self.domain().size() <= committer_key.max_degree() + 1);
         let pks_x_comm =
-            S::commit(kzg_pk, &self.pks_polys[0]).expect("Commitment to pks_x_poly failed");
+            S::commit(committer_key, &self.pks_polys[0]).expect("Commitment to pks_x_poly failed");
         let pks_y_comm =
-            S::commit(kzg_pk, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
+            S::commit(committer_key, &self.pks_polys[1]).expect("Commitment to pks_y_poly failed");
         KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             domain_size: self.domain().size() as u64,

@@ -12,14 +12,14 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
     fn set_protocol_params<D: FftDomain<F>, VK: RawVerifierKey>(
         &mut self,
         domain: &D,
-        kzg_vk: &VK,
+        verifier_key: &VK,
     ) {
         // Bind the domain by size and generator rather than by serialising a concrete domain
         // type. Sizes are not powers of two on BW6-767, and prover and verifier disagreeing
         // about which domain a proof is over must be a verification failure, not silent.
         self._append_serializable(b"domain_size", &(domain.size() as u64));
         self._append_serializable(b"domain_generator", &domain.generator());
-        self._append_serializable(b"vk", kzg_vk);
+        self._append_serializable(b"vk", verifier_key);
     }
 
     fn set_keyset_commitment<C>(&mut self, keyset_commitment: &KeysetCommitment<F, C>)
@@ -74,8 +74,8 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
         self._append_serializable(b"shifted_linearization_evaluation", r_at_zeta_omega);
     }
 
-    fn get_kzg_aggregation_challenges(&mut self, n: usize) -> Vec<F> {
-        self._get_128_bit_challenges(b"kzg_aggregation", n)
+    fn get_opening_aggregation_challenges(&mut self, n: usize) -> Vec<F> {
+        self._get_128_bit_challenges(b"opening_aggregation", n)
     }
 
     fn _get_128_bit_challenge(&mut self, label: &'static [u8]) -> F;
