@@ -10,7 +10,7 @@ use crate::piop::affine_addition::{
     AffineAdditionEvaluations, AffineAdditionRegisters, PartialSumsPolynomials,
 };
 use crate::piop::{ProverProtocol, RegisterEvaluations};
-use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
+use crate::{utils, AccountablePublicInput, AccumulatorSeed, Bitmask, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AffineAdditionEvaluationsWithoutBitmask<F: FftField> {
@@ -36,7 +36,7 @@ pub struct BasicRegisterBuilder<F: PrimeField, D: DomainSet<F>> {
 
 impl<IC, OC, S, D> ProverProtocol<IC, OC, S, D> for BasicRegisterBuilder<OC::ScalarField, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,

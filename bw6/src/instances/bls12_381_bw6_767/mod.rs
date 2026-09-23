@@ -230,6 +230,40 @@ pub const U: &[u64] = ark_bls12_381::Config::X;
 //      639090213645505120388400344940985710520836292650"
 // );
 
+/// Seeds the affine-addition accumulator at `(0, 2)`: on the curve `y^2 = x^3 + 4`,
+/// of order 3, and so outside G1. See [`crate::AccumulatorSeed`].
+// Spelled as the concrete projective type rather than the `InnerCurve` alias: the alias goes
+// through `Bls12Config::G1Config`, and coherence cannot tell the two curves' projections apart.
+impl crate::AccumulatorSeed for ark_ec::short_weierstrass::Projective<ark_bls12_381::g1::Config> {
+    fn accumulator_seed() -> ark_ec::short_weierstrass::Affine<ark_bls12_381::g1::Config> {
+        crate::point_in_g1_complement::<ark_bls12_381::g1::Config>()
+    }
+}
+
+#[cfg(test)]
+mod accumulator_seed {
+    use super::*;
+    use crate::AccumulatorSeed;
+    use ark_ec::AffineRepr;
+    use ark_std::Zero;
+
+    /// The seed the prover and verifier start the accumulator from must be a curve point that
+    /// is not in G1 — pinned by value, so changing it is a deliberate protocol change.
+    #[test]
+    fn seed_is_on_the_curve_and_outside_g1() {
+        let h = InnerCurve::accumulator_seed();
+        assert_eq!(
+            h.xy(),
+            Some((ark_bls12_381::Fq::from(0u8), ark_bls12_381::Fq::from(2u8)))
+        );
+        assert!(h.is_on_curve());
+        assert!(!h.is_in_correct_subgroup_assuming_on_curve());
+        // Order 3: h + h + h is the identity, and h itself is not.
+        assert!(!h.is_zero());
+        assert!((h.into_group() + h + h).is_zero());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

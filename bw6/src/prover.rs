@@ -12,13 +12,13 @@ use crate::piop::ProverProtocol;
 use crate::piop::RegisterPolynomials;
 use crate::transcript::ApkTranscript;
 use crate::{
-    AccountablePublicInput, Bitmask, CommitmentExt, CountingProof, CountingPublicInput, Keyset,
-    KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
+    AccountablePublicInput, AccumulatorSeed, Bitmask, CommitmentExt, CountingProof,
+    CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
 };
 
 pub struct Prover<IC, OC, S, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
@@ -32,7 +32,7 @@ where
 
 impl<IC, OC, S, D> Prover<IC, OC, S, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
@@ -201,10 +201,11 @@ where
         // and commit to the opening proofs.
         let mut register_polynomials = protocol.get_register_polynomials_to_open();
         register_polynomials.push(q_poly);
-        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_opening_aggregation_challenges(
-            &mut transcript,
-            register_polynomials.len(),
-        );
+        let nus =
+            <Transcript as ApkTranscript<OC::ScalarField>>::get_opening_aggregation_challenges(
+                &mut transcript,
+                register_polynomials.len(),
+            );
         let w_poly = w3f_pcs::aggregation::single::aggregate_polys(&register_polynomials, &nus);
         let w_at_zeta_proof =
             S::open(&self.committer_key, &w_poly, zeta).expect("opening zeta proof failed");
@@ -234,7 +235,7 @@ where
 /// See [`SupportsPackedScheme`](crate::SupportsPackedScheme).
 impl<IC, OC, S, D> Prover<IC, OC, S, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,

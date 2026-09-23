@@ -40,7 +40,8 @@ pub trait ApkConfig: 'static + Sized {
     const NAME: &'static str;
 
     /// Where the BLS public keys live.
-    type InnerCurve: CurveGroup;
+    /// Must seed the accumulator outside G1; see [`crate::AccumulatorSeed`].
+    type InnerCurve: crate::AccumulatorSeed;
 
     /// The pairing `InnerCurve` belongs to.
     ///

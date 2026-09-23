@@ -6,7 +6,7 @@ use w3f_pcs::pcs::PCS;
 
 use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
-use crate::{utils, Bitmask, Keyset, PublicInput};
+use crate::{utils, AccumulatorSeed, Bitmask, Keyset, PublicInput};
 
 pub mod affine_addition;
 pub mod bit_counting;
@@ -94,7 +94,7 @@ impl<G: AffineRepr> RegisterPolynomials<G> for () {
 
 pub trait ProverProtocol<IC, OC, S, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
@@ -166,7 +166,7 @@ pub trait RegisterEvaluations<F: Field>: CanonicalSerialize + CanonicalDeseriali
 
 pub trait VerifierProtocol<IC, OC, S>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,

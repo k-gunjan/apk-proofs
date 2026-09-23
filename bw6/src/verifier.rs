@@ -14,8 +14,8 @@ use crate::piop::{RegisterCommitments, RegisterEvaluations, VerifierProtocol};
 use crate::transcript::ApkTranscript;
 use crate::utils::LagrangeEvaluations;
 use crate::{
-    utils, AccountablePublicInput, CommitmentExt, CountingProof, CountingPublicInput,
-    KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
+    utils, AccountablePublicInput, AccumulatorSeed, CommitmentExt, CountingProof,
+    CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
 };
 
 type Transcript = MerlinTranscript;
@@ -29,7 +29,7 @@ pub struct Challenges<F: FftField> {
 
 pub struct Verifier<IC, OC, S, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
@@ -44,7 +44,7 @@ where
 
 impl<IC, OC, S, D> Verifier<IC, OC, S, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
@@ -326,10 +326,11 @@ where
             &proof.q_zeta,
             &proof.r_zeta_omega,
         );
-        let nus = <Transcript as ApkTranscript<OC::ScalarField>>::get_opening_aggregation_challenges(
-            &mut transcript,
-            batch_size,
-        );
+        let nus =
+            <Transcript as ApkTranscript<OC::ScalarField>>::get_opening_aggregation_challenges(
+                &mut transcript,
+                batch_size,
+            );
 
         (
             Challenges { r, phi, zeta, nus },

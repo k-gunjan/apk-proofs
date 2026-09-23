@@ -13,7 +13,7 @@ use crate::piop::{
     RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
 };
 use crate::utils::LagrangeEvaluations;
-use crate::{point_in_g1_complement_g, Keyset};
+use crate::{AccumulatorSeed, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct PartialSumsCommitments<G: AffineRepr>(pub G, pub G);
@@ -123,7 +123,7 @@ impl<F: FftField> RegisterEvaluations<F> for AffineAdditionEvaluations<F> {
 
 impl<IC, OC, S> VerifierProtocol<IC, OC, S> for AffineAdditionEvaluations<OC::ScalarField>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
@@ -171,7 +171,7 @@ impl<F: FftField> AffineAdditionEvaluations<F> {
         evals_at_zeta: &LagrangeEvaluations<F>,
     ) -> Vec<F>
     where
-        IC: CurveGroup,
+        IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         OC::ScalarField: From<IC::BaseField>,
     {
@@ -210,14 +210,14 @@ pub struct AffineAdditionRegisters<F: PrimeField, D: DomainSet<F>> {
 impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
     pub fn new<IC, OC>(domains: Domains<F, D>, keyset: Keyset<IC, OC, D>, bitmask: &[bool]) -> Self
     where
-        IC: CurveGroup,
+        IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         OC::ScalarField: From<IC::BaseField>,
     {
         assert_eq!(bitmask.len(), keyset.size());
         let domain_size = keyset.domain().size();
 
-        let h = point_in_g1_complement_g::<IC>();
+        let h = IC::accumulator_seed().into_group();
         let apk_acc = bitmask
             .iter()
             .zip(keyset.pks.iter())
@@ -263,7 +263,7 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         apk_acc: [Vec<F>; 2],
     ) -> Self
     where
-        IC: CurveGroup,
+        IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         OC::ScalarField: From<IC::BaseField>,
     {
@@ -338,7 +338,7 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
 
     pub fn compute_constraint_polynomials<IC, OC>(&self) -> Vec<DensePolynomial<F>>
     where
-        IC: CurveGroup,
+        IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         OC::ScalarField: From<IC::BaseField>,
     {
@@ -365,7 +365,7 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
 
 pub(crate) struct Constraints<IC, OC>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
 {
@@ -375,7 +375,7 @@ where
 
 impl<IC, OC> Constraints<IC, OC>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
 {
@@ -520,7 +520,7 @@ where
         x1: OC::ScalarField,
         y1: OC::ScalarField,
     ) -> (OC::ScalarField, OC::ScalarField) {
-        let h = point_in_g1_complement_g::<IC>().into_affine();
+        let h = IC::accumulator_seed();
         let apk_plus_h = (h + apk).into_affine();
         let (h_x, h_y): (OC::ScalarField, OC::ScalarField) = h
             .xy()

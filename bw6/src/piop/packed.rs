@@ -10,7 +10,7 @@ use crate::piop::bitmask_packing::{
     BitmaskPackingPolynomials, BitmaskPackingRegisters, SuccinctAccountableRegisterEvaluations,
 };
 use crate::piop::ProverProtocol;
-use crate::{utils, AccountablePublicInput, Bitmask, Keyset};
+use crate::{utils, AccountablePublicInput, AccumulatorSeed, Bitmask, Keyset};
 
 pub struct PackedRegisterBuilder<F: PrimeField, D: DomainSet<F>> {
     bitmask: Bitmask,
@@ -21,7 +21,7 @@ pub struct PackedRegisterBuilder<F: PrimeField, D: DomainSet<F>> {
 
 impl<IC, OC, S, D> ProverProtocol<IC, OC, S, D> for PackedRegisterBuilder<OC::ScalarField, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,

@@ -15,7 +15,7 @@ use crate::piop::{
     ProverProtocol, RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
 };
 use crate::utils::LagrangeEvaluations;
-use crate::{utils, Bitmask, CountingPublicInput, Keyset};
+use crate::{utils, AccumulatorSeed, Bitmask, CountingPublicInput, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingCommitments<G: AffineRepr> {
@@ -69,7 +69,7 @@ pub struct CountingScheme<F: PrimeField, D: DomainSet<F>> {
 
 impl<IC, OC, S, D> ProverProtocol<IC, OC, S, D> for CountingScheme<OC::ScalarField, D>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
@@ -164,7 +164,7 @@ where
 
 impl<IC, OC, S> VerifierProtocol<IC, OC, S> for CountingEvaluations<OC::ScalarField>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
@@ -207,7 +207,7 @@ impl<F: FftField> CountingEvaluations<F> {
         evals_at_zeta: &LagrangeEvaluations<OC::ScalarField>,
     ) -> Vec<OC::ScalarField>
     where
-        IC: CurveGroup,
+        IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         F: From<IC::BaseField>,
     {

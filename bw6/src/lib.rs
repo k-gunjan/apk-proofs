@@ -1,9 +1,9 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
 use ark_ec::short_weierstrass::{Affine, SWCurveConfig};
 use ark_ec::{AffineRepr, CurveGroup};
-use ark_ff::{FftField, PrimeField};
+use ark_ff::{FftField, Field, PrimeField};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::{One, Zero};
+use ark_std::Zero;
 use w3f_pcs::pcs::commitment::WrappedAffine;
 
 pub use bitmask::Bitmask;
@@ -173,19 +173,41 @@ pub type PackedProof<F, G, Comm, OProof> = Proof<
 pub type CountingProof<F, G, Comm, OProof> =
     Proof<F, CountingEvaluations<F>, CountingCommitments<G>, (), Comm, OProof>;
 
+/// `(0, sqrt(b))`: a point on the curve `y^2 = x^3 + b` but outside its prime-order subgroup.
+///
+/// On a curve with `a = 0` any point with `x = 0` is a flex point, so it has order 3; as long as
+/// 3 does not divide the subgroup order, it cannot lie in the subgroup. Of the two square roots
+/// the numerically smaller is taken, so the point is the same on every machine: `(0, 1)` on
+/// BLS12-377 (`b = 1`) and `(0, 2)` on BLS12-381 (`b = 4`).
+///
+/// Panics if `a != 0` or `b` is not a square, i.e. on curves this construction does not fit.
+/// That the result really is on the curve and outside the subgroup is asserted in tests per
+/// curve, not here, to keep a subgroup check off the prover's and verifier's paths.
 pub fn point_in_g1_complement<P: SWCurveConfig>() -> Affine<P> {
-    let h_x: P::BaseField = P::BaseField::zero();
-    let h_y: P::BaseField = P::BaseField::one();
-
-    Affine::<P>::new_unchecked(h_x, h_y)
+    assert!(
+        P::COEFF_A.is_zero(),
+        "(0, sqrt(b)) needs a curve with a = 0"
+    );
+    let y = P::COEFF_B
+        .sqrt()
+        .expect("b is not a square: (0, sqrt(b)) is not on this curve");
+    let y = core::cmp::min(y, -y);
+    Affine::<P>::new_unchecked(P::BaseField::zero(), y)
 }
 
-// TODO: Generator + one should be in the group complement. better approach?
-pub fn point_in_g1_complement_g<C: CurveGroup>() -> C {
-    let mut h = C::zero();
-    let one = C::ScalarField::one();
-    h += C::generator() * one;
-    h
+/// Inner curves that can carry the affine-addition accumulator.
+///
+/// The accumulator starts at [`AccumulatorSeed::accumulator_seed`], a point `h` on the curve but
+/// **outside** the prime-order subgroup G1 the public keys live in. That is what keeps the
+/// incomplete addition formulas sound: `h + S` for any sum `S` of G1 points is never `±pk` for a
+/// `pk` in G1, so the prover can never reach the doubling case — where both addition
+/// constraints vanish for *any* next accumulator value — and never reaches the identity, which
+/// has no affine form. A seed inside G1 (the generator, say) gives both away to anyone able to
+/// register a key.
+///
+/// Every [`ApkConfig::InnerCurve`] must implement this; see `crate::instances`.
+pub trait AccumulatorSeed: CurveGroup {
+    fn accumulator_seed() -> Self::Affine;
 }
 
 // TODO: switch to better hash to curve when available
@@ -205,16 +227,24 @@ mod tests {
     use super::*;
 
     #[test]
-    #[ignore = "point (0,1) is not outside the sub-group for bw6-761. test differently"]
-    fn h_is_not_in_g1_bw6() {
+    fn h_is_not_in_g1_bw6_761() {
         let h = point_in_g1_complement::<ark_bw6_761::g1::Config>();
         assert!(h.is_on_curve());
         assert!(!h.is_in_correct_subgroup_assuming_on_curve());
     }
 
     #[test]
-    fn h_is_not_in_g1_bls12() {
+    fn h_is_not_in_g1_bls12_377() {
         let h = point_in_g1_complement::<ark_bls12_377::g1::Config>();
+        assert!(h.is_on_curve());
+        assert!(!h.is_in_correct_subgroup_assuming_on_curve());
+    }
+
+    /// `(0, 1)` is not even on BLS12-381 (`b = 4`); the construction has to land on `(0, 2)`.
+    #[test]
+    fn h_is_not_in_g1_bls12_381() {
+        let h = point_in_g1_complement::<ark_bls12_381::g1::Config>();
+        assert_eq!(h.y().unwrap(), ark_bls12_381::Fq::from(2u8));
         assert!(h.is_on_curve());
         assert!(!h.is_in_correct_subgroup_assuming_on_curve());
     }

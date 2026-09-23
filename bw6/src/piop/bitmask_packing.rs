@@ -13,7 +13,7 @@ use crate::piop::{
     RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
 };
 use crate::utils::LagrangeEvaluations;
-use crate::{utils, Bitmask};
+use crate::{utils, AccumulatorSeed, Bitmask};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize, Clone)]
 pub struct BitmaskPackingCommitments<G: AffineRepr> {
@@ -80,7 +80,7 @@ impl<F: PrimeField> SuccinctAccountableRegisterEvaluations<F> {
         domain_size: u64,
     ) -> Vec<F>
     where
-        IC: CurveGroup,
+        IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         OC::ScalarField: From<IC::BaseField>,
     {
@@ -149,7 +149,7 @@ impl<F: PrimeField> SuccinctAccountableRegisterEvaluations<F> {
 impl<IC, OC, S> VerifierProtocol<IC, OC, S>
     for SuccinctAccountableRegisterEvaluations<OC::ScalarField>
 where
-    IC: CurveGroup,
+    IC: AccumulatorSeed,
     OC: CurveGroup,
     OC::ScalarField: From<IC::BaseField>,
     S: PCS<OC::ScalarField>,
