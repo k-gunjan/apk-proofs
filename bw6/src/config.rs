@@ -35,7 +35,8 @@ pub type ScalarOf<C> = <<C as ApkConfig>::OuterCurve as ark_ec::PrimeGroup>::Sca
 
 /// A coherent choice of curves, commitment scheme and evaluation domains.
 pub trait ApkConfig: 'static + Sized {
-    /// Distinguishes configurations in the Fiat-Shamir transcript.
+    /// Distinguishes configurations in the Fiat-Shamir transcript: it is the label
+    /// [`ApkConfig::transcript`] opens with.
     const NAME: &'static str;
 
     /// Where the BLS public keys live.
@@ -68,6 +69,15 @@ pub trait ApkConfig: 'static + Sized {
         max_degree: usize,
         rng: &mut R,
     ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params;
+
+    /// A fresh Fiat-Shamir transcript for this configuration.
+    ///
+    /// Prover and verifier must start from byte-identical transcripts, so both obtain it here
+    /// rather than spelling out a label at each call site. Labelling with [`ApkConfig::NAME`]
+    /// also means a proof made under one configuration never replays under another.
+    fn transcript() -> merlin::Transcript {
+        merlin::Transcript::new(Self::NAME.as_bytes())
+    }
 }
 
 /// The prover for a configuration.
@@ -213,7 +223,7 @@ where
     ///
     /// `keyset_size` is the number of validators, not a logarithm and not a domain size: which
     /// domain that implies is the configuration's business, and on APK-381 it is not a power of
-    /// two. Read it back with [`Apk::domain_size`] if you need to know.
+    /// two. Read it back with [`Apk::domain_size`] for ref.
     pub fn setup<R: rand::Rng>(keyset_size: usize, rng: &mut R) -> PcsParamsOf<C> {
         setup_for_keyset::<C, R>(keyset_size, rng)
     }
@@ -250,12 +260,7 @@ where
         keyset: KeysetOf<C>,
         commitment: &KeysetCommitmentOf<C>,
     ) -> ProverOf<C> {
-        ProverOf::<C>::new(
-            keyset,
-            commitment,
-            params.clone(),
-            merlin::Transcript::new(b"apk_proof"),
-        )
+        ProverOf::<C>::new(keyset, commitment, params.clone(), C::transcript())
     }
 
     fn verifier(
@@ -263,11 +268,7 @@ where
         commitment: KeysetCommitmentOf<C>,
     ) -> Result<VerifierOf<C>, crate::DomainError> {
         use w3f_pcs::pcs::PcsParams;
-        VerifierOf::<C>::try_new(
-            params.raw_vk(),
-            commitment,
-            merlin::Transcript::new(b"apk_proof"),
-        )
+        VerifierOf::<C>::try_new(params.raw_vk(), commitment, C::transcript())
     }
 
     /// Proves that `bitmask` selects the signers whose aggregate key the returned public input

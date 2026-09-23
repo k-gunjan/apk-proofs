@@ -151,8 +151,7 @@ fn amplification(c: &mut Criterion) {
 }
 
 fn verification(c: &mut Criterion) {
-    use apk_proofs::{Bitmask, Prover, Verifier};
-    use merlin::Transcript;
+    use apk_proofs::{ApkConfig, Bitmask, Bls12_377Config, Prover, Verifier};
 
     let mut group = c.benchmark_group("verification");
 
@@ -179,7 +178,7 @@ fn verification(c: &mut Criterion) {
             keyset,
             &pks_comm,
             pcs_params.clone(),
-            Transcript::new(b"apk_proof"),
+            Bls12_377Config::transcript(),
         );
 
         let proof_basic = prover.prove_simple(bitmask.clone());
@@ -190,7 +189,7 @@ fn verification(c: &mut Criterion) {
             Verifier::<InnerCurve, OuterCurve, TestPCS, BenchDomain>::new(
                 pcs_params.raw_vk(),
                 pks_comm.clone(),
-                Transcript::new(b"apk_proof"),
+                Bls12_377Config::transcript(),
             )
         };
 

@@ -9,7 +9,6 @@ use ark_ff::{FftField, One, Zero};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer, test_rng};
-use merlin::Transcript;
 use w3f_pcs::pcs::{PcsParams, PCS};
 
 use crate::config::{
@@ -88,15 +87,10 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
     let (keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let t_prover_new = start_timer!(|| "prover precomputation");
-    let prover = ProverOf::<C>::new(
-        keyset,
-        &pks_comm,
-        params.clone(),
-        Transcript::new(b"apk_proof"),
-    );
+    let prover = ProverOf::<C>::new(keyset, &pks_comm, params.clone(), C::transcript());
     end_timer!(t_prover_new);
 
-    let verifier = VerifierOf::<C>::new(params.raw_vk(), pks_comm, Transcript::new(b"apk_proof"));
+    let verifier = VerifierOf::<C>::new(params.raw_vk(), pks_comm, C::transcript());
 
     let bits = (0..keyset_size)
         .map(|_| rng.gen_bool(2.0 / 3.0))
@@ -328,7 +322,7 @@ where
     not_exact.domain_size = unrealisable;
     assert!(
         matches!(
-            VerifierOf::<C>::try_new(params.raw_vk(), not_exact, Transcript::new(b"apk_proof")),
+            VerifierOf::<C>::try_new(params.raw_vk(), not_exact, C::transcript()),
             Err(crate::DomainError::NotExact { .. })
         ),
         "a domain size the field cannot realise exactly must be rejected"
@@ -338,7 +332,7 @@ where
     too_large.domain_size = u64::MAX;
     assert!(
         matches!(
-            VerifierOf::<C>::try_new(params.raw_vk(), too_large, Transcript::new(b"apk_proof")),
+            VerifierOf::<C>::try_new(params.raw_vk(), too_large, C::transcript()),
             Err(crate::DomainError::TooLarge { .. })
         ),
         "an unrealisable domain size must be rejected"
