@@ -363,6 +363,39 @@ pub fn test_rejects_bad_domain_size_381(keyset_size: usize) {
     _test_rejects_bad_domain_size::<Bls12_381Config>(keyset_size, 254);
 }
 
+/// An SRS generated for one keyset size, used with a larger one.
+///
+/// Nothing ties `Apk::setup`'s argument to the length of the vector handed to `commit_keyset`,
+/// so this is a caller mistake the crate has to report well. It used to surface as an `unwrap`
+/// on an opaque `Err(())` inside a commit closure, long after `commit_keyset` had cheerfully
+/// succeeded: the keyset polynomials are degree `n - 1` and fit, while the quotient at `3n - 3`
+/// does not.
+pub fn test_undersized_srs_is_reported_at_prover_construction() {
+    let rng = &mut test_rng();
+    type C = Bls12_377Config;
+
+    // 255 keys need a domain of 256; 300 need 512, and so an SRS three times larger.
+    let params = Apk::<C>::setup(255, rng);
+    let pks = random_pks::<_, <C as ApkConfig>::InnerCurve>(300, rng);
+
+    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
+        let bitmask = Bitmask::from_bits(&vec![true; 300]);
+        let _ = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
+    }))
+    .expect_err("proving against an undersized SRS must not succeed");
+
+    let message = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .unwrap_or("<not a string>");
+    assert!(
+        message.contains("SRS too small") && message.contains("degree 1533"),
+        "the failure must name the degree it needed, got: {}",
+        message
+    );
+}
+
 /// One function body, both curves — the same four calls, with only the config type changed.
 pub fn test_config_driven_api() {
     fn roundtrip<C: ApkConfig>(keyset_size: usize) -> bool

@@ -85,7 +85,7 @@ impl Bitmask {
     }
 }
 
-// may overflow
+// TODO: may overflow
 fn div_ceil(a: usize, b: usize) -> usize {
     (a + b - 1) / b
 }
@@ -107,7 +107,9 @@ fn limbs_to_field_elements<F: PrimeField>(limbs: &[u64]) -> F {
 
 #[cfg(test)]
 mod tests {
+    use ark_bls12_381::Fq;
     use ark_bw6_761::Fr;
+    use ark_ff::Field;
     use ark_std::test_rng;
 
     use crate::test_helpers::_random_bits;
@@ -176,5 +178,40 @@ mod tests {
         _test_to_field_element(vec![63], 2u128.pow(63));
         _test_to_field_element(vec![0, 64], 2u128.pow(64) + 1);
         _test_to_field_element(vec![126], 2u128.pow(126));
+    }
+
+    // ark_bls12_381::Fq::MODULUS_BIT_SIZE is 381, so the assertion in
+    // `to_chunks_as_field_elements` caps chunks at 380 bits (`MODULUS_BIT_SIZE - 1`).
+    // Since chunk sizes are quantized in units of `BITS_IN_LIMB` (64), the largest
+    // chunk that satisfies the assertion is 5 limbs = 320 bits; 6 limbs = 384 bits
+    // exceeds the capacity and must panic before it can overflow the field modulus p.
+
+    #[test]
+    pub fn test_max_capacity_chunk_unwraps_successfully() {
+        let capacity: usize = (Fq::MODULUS_BIT_SIZE - 1).try_into().unwrap();
+        let limbs_in_chunk = capacity / BITS_IN_LIMB;
+        let bits_in_chunk = BITS_IN_LIMB * limbs_in_chunk;
+        assert!(bits_in_chunk <= capacity);
+
+        let bits = vec![true; bits_in_chunk];
+        let bitmask = Bitmask::from_bits(&bits);
+        let chunks = bitmask.to_chunks_as_field_elements::<Fq>(limbs_in_chunk);
+
+        assert_eq!(chunks.len(), 1);
+        let expected = Fq::from(2u8).pow([bits_in_chunk as u64]) - Fq::from(1u8);
+        assert_eq!(chunks[0], expected);
+    }
+
+    #[test]
+    #[should_panic]
+    pub fn test_chunk_exceeding_capacity_panics() {
+        let capacity: usize = (Fq::MODULUS_BIT_SIZE - 1).try_into().unwrap();
+        let limbs_in_chunk = capacity / BITS_IN_LIMB + 1;
+        let bits_in_chunk = BITS_IN_LIMB * limbs_in_chunk;
+        assert!(bits_in_chunk > capacity);
+
+        let bits = vec![true; bits_in_chunk];
+        let bitmask = Bitmask::from_bits(&bits);
+        let _ = bitmask.to_chunks_as_field_elements::<Fq>(limbs_in_chunk);
     }
 }

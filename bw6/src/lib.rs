@@ -271,6 +271,12 @@ mod tests {
         test_helpers::test_rejects_bad_domain_size_381(252);
     }
 
+    /// An SRS sized for a smaller keyset must fail early and say so.
+    #[test]
+    fn test_undersized_srs_is_reported_at_prover_construction() {
+        test_helpers::test_undersized_srs_is_reported_at_prover_construction();
+    }
+
     /// One function body, both curves.
     #[test]
     fn test_config_driven_api() {

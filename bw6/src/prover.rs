@@ -1,7 +1,7 @@
 use ark_ec::CurveGroup;
 use ark_poly::Polynomial;
 use merlin::Transcript;
-use w3f_pcs::pcs::{PcsParams, PCS};
+use w3f_pcs::pcs::{CommitterKey, PcsParams, PCS};
 
 use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
@@ -48,8 +48,28 @@ where
         mut empty_transcript: Transcript,
     ) -> Self {
         let domains = Domains::from_set(keyset.domains.clone());
+        let committer_key = pcs_params.ck();
 
-        // assert!(pcs_params.fits(keyset.domain().size())); // SRS contains enough elements
+        // The SRS has to cover the quotient, which is the highest-degree thing the prover
+        // commits to — `3n - 3`, not `n`. Checked here rather than left to the commitment that
+        // needs it: `Keyset::commit` only needs degree `n - 1` and so happily succeeds against
+        // parameters this prover will later fail on, and that failure lands inside a commit
+        // closure as an `unwrap` on an opaque `Err(())`.
+        //
+        // Reachable whenever the SRS was generated for fewer keys than the keyset holds, since
+        // nothing ties `Apk::setup`'s argument to the length of the vector passed to
+        // `commit_keyset`.
+        let required = crate::setup::highest_degree_to_commit(keyset.domain().size());
+        assert!(
+            required <= committer_key.max_degree(),
+            "SRS too small: a keyset over a domain of {} needs commitments up to degree {}, \
+             but these parameters stop at {}. Generate them for at least as many keys as the \
+             keyset holds.",
+            keyset.domain().size(),
+            required,
+            committer_key.max_degree()
+        );
+
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(
             &mut empty_transcript,
             keyset.domain(),
@@ -65,7 +85,7 @@ where
         Self {
             domains,
             keyset,
-            committer_key: pcs_params.ck(),
+            committer_key,
             preprocessed_transcript: empty_transcript,
         }
     }

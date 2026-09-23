@@ -41,7 +41,7 @@ where
 ///
 /// That is the quotient `q = aggregate_constraint_polynomial / vanishing_polynomial`. The
 /// highest constraint degree is `4n - 3`, so `deg(q) = 3n - 3`.
-fn highest_degree_to_commit(domain_size: usize) -> usize {
+pub(crate) fn highest_degree_to_commit(domain_size: usize) -> usize {
     3 * domain_size - 3
 }
 
@@ -97,6 +97,42 @@ mod tests {
         // keyset_size + 1 (for the accumulator), rounded up to a power of two.
         let required_domain_size = (keyset_size + 1).next_power_of_two();
         assert!(params_fit::<TestKzg, Fr>(&params, required_domain_size));
+    }
+
+    /// The SRS is sized from the domain the prover will actually build, never from the
+    /// caller's request. That matters most where a field's subgroup orders are sparse: on
+    /// BW6-767 a keyset of 3243 lands on a domain of 11891, and an SRS cut to the request
+    /// would be a third of the size the quotient needs.
+    ///
+    /// Demonstrated with a deliberately gappy table rather than the real one, so the property
+    /// is pinned independently of how APK-381's sizes happen to be spaced today.
+    #[test]
+    fn srs_follows_the_realised_domain_not_the_request() {
+        use crate::domain::{DomainSizes, DomainTriple, SmoothDomainSet};
+        type Fr767 = ark_bw6_767::Fr;
+
+        struct Gappy;
+        impl DomainSizes<Fr767> for Gappy {
+            fn triple_for(min_size: usize) -> Option<DomainTriple> {
+                // Legal but sparse: every entry is still a subgroup order of this field.
+                // `.iter().copied()` rather than `.into_iter()`: this crate is on edition
+                // 2018, where an array's `into_iter` still yields references.
+                [1usize, 3, 1081]
+                    .iter()
+                    .copied()
+                    .find(|&n| n >= min_size)
+                    .map(|n| DomainTriple::new(n, 2 * n, 6 * n))
+            }
+        }
+
+        let realised = SmoothDomainSet::<Fr767, Gappy>::for_min_size(31)
+            .unwrap()
+            .base()
+            .size();
+        assert_eq!(realised, 1081, "31 rows round up across the gap");
+        assert_eq!(highest_degree_to_commit(realised), 3 * 1081 - 3);
+        // What sizing off the request would have given: 36x too small.
+        assert!(highest_degree_to_commit(31) < highest_degree_to_commit(realised) / 30);
     }
 
     /// BW6-761's scalar field has two-adicity 46, so a domain of 2^50 does not exist. The
