@@ -305,7 +305,11 @@ mod tests {
                 .copied()
                 .find(|&n| n > d)
                 .expect("a dominated entry must have a successor");
-            assert!(next < 2 * d, "{} would double the padding, not a fair swap", next);
+            assert!(
+                next < 2 * d,
+                "{} would double the padding, not a fair swap",
+                next
+            );
         }
     }
 

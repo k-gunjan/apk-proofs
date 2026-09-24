@@ -39,7 +39,11 @@ pub struct DomainTriple {
 
 impl DomainTriple {
     pub const fn new(base: usize, medium: usize, large: usize) -> Self {
-        DomainTriple { base, medium, large }
+        DomainTriple {
+            base,
+            medium,
+            large,
+        }
     }
 
     /// The protocol invariant, in one place. Both bounds are floors, not targets: a domain set
@@ -564,5 +568,4 @@ mod tests {
         assert_eq!(set.large().size(), 1024);
         assert_eq!(nesting_index(set.base(), set.large()), Some(4));
     }
-
 }

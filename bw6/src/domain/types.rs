@@ -211,9 +211,8 @@ mod tests {
         let quotient = DensePolynomial::from_coefficients_vec(
             (0..3 * 517 - 2).map(|_| Fr::rand(rng)).collect(),
         );
-        let remainder = DensePolynomial::from_coefficients_vec(
-            (0..517).map(|_| Fr::rand(rng)).collect(),
-        );
+        let remainder =
+            DensePolynomial::from_coefficients_vec((0..517).map(|_| Fr::rand(rng)).collect());
 
         // Reconstruct q * (X^n - 1) + r without multiplying polynomials, which is itself the
         // operation this field cannot do by FFT.
@@ -227,7 +226,10 @@ mod tests {
         }
         let dividend = DensePolynomial::from_coefficients_vec(product);
 
-        assert_eq!(domain.divide_by_vanishing_poly(&dividend), (quotient, remainder));
+        assert_eq!(
+            domain.divide_by_vanishing_poly(&dividend),
+            (quotient, remainder)
+        );
     }
 
     /// A polynomial that vanishes on `H` divides exactly. This is the property the prover

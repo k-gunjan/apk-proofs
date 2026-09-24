@@ -248,7 +248,8 @@ mod tests {
         let m = n - 1;
 
         let pcs_params = Pcs::setup(m, rng);
-        let mut keyset = Keyset::<G1Projective, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
+        let mut keyset =
+            Keyset::<G1Projective, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
         keyset.amplify();
 
         let mut scheme: CountingScheme<Fr, TestDomain> =

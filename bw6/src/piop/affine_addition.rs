@@ -626,7 +626,8 @@ mod tests {
         let m = n - 1;
         let domains = TestDomains::new(n);
 
-        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
+        let mut keyset =
+            Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
         keyset.amplify();
         let registers =
             AffineAdditionRegisters::new(domains.clone(), keyset, &_random_bits(m, 0.5, rng));
@@ -649,7 +650,8 @@ mod tests {
 
         let bits = _random_bits(m, 0.5, rng);
 
-        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
+        let mut keyset =
+            Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(domains.clone(), keyset.clone(), &bits);
         let constraint_polys =

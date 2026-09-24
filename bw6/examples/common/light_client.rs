@@ -331,11 +331,8 @@ where
         )
         });
 
-        let new_validator_set_commitment = approvals
-            .first()
-            .ok_or(ApkError::NoSigners)?
-            .comm
-            .clone();
+        let new_validator_set_commitment =
+            approvals.first().ok_or(ApkError::NoSigners)?.comm.clone();
         // Compared as group elements rather than through a HashSet: `PublicKey<E>`'s derived
         // `Hash` would demand `E: Hash`, which no pairing implements.
         let actual_signers: Vec<C::InnerCurve> =

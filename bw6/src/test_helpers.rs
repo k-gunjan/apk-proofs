@@ -432,8 +432,7 @@ pub fn test_config_driven_api() {
         let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
         let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks).unwrap();
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);
-        let (proof, public_input) =
-            Apk::<C>::prove(&params, keyset, &commitment, bitmask).unwrap();
+        let (proof, public_input) = Apk::<C>::prove(&params, keyset, &commitment, bitmask).unwrap();
         Apk::<C>::verify(&params, commitment, &public_input, &proof).unwrap()
     }
 

@@ -85,7 +85,7 @@ where
         IC: PrimeSubgroup,
     {
         let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-        // Before key validation: this is a lookup, validation is per key.
+                                             // Before key validation: this is a lookup, validation is per key.
         let domains = D::for_min_size(min_domain_size)?;
         let domain = domains.base();
 
@@ -198,7 +198,9 @@ mod tests {
     use super::*;
     use crate::setup::InsecureSetup;
     use crate::test_helpers::random_pks;
-    use crate::{Apk, ApkConfig, Bls12_377Config, Bls12_381Config, KeysetOf, PcsParamsOf, ScalarOf};
+    use crate::{
+        Apk, ApkConfig, Bls12_377Config, Bls12_381Config, KeysetOf, PcsParamsOf, ScalarOf,
+    };
     use ark_ec::short_weierstrass::SWCurveConfig;
     use ark_std::{test_rng, Zero};
     use w3f_pcs::pcs::{PcsParams, PCS};
@@ -244,10 +246,8 @@ mod tests {
     where
         C: ApkConfig,
         ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
-        <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<
-                ScalarOf<C>,
-                Affine = <C::OuterCurve as CurveGroup>::Affine,
-            > + Clone,
+        <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine>
+            + Clone,
         PcsParamsOf<C>: Clone,
         InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     {
