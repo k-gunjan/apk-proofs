@@ -20,9 +20,10 @@
 //! // Insecure source: samples the trapdoor locally, so tests only (`test-utils`). Production
 //! // parameters must come from a trusted-setup ceremony; see `crate::setup`.
 //! let setup = Apk381::setup(&mut InsecureSetup::new(rng), 1000).unwrap(); // validators, not log2(anything)
-//! let (keyset, commitment) = Apk381::commit_keyset(&setup, pks);
-//! let (proof, public_input) = Apk381::prove(&setup, keyset, &commitment, bitmask);
-//! assert!(Apk381::verify(&setup, commitment, &public_input, &proof).unwrap());
+//! let (keyset, commitment) = Apk381::commit_keyset(&setup, pks)?;
+//! let (proof, public_input) = Apk381::prove(&setup, keyset, &commitment, bitmask)?;
+//! assert!(Apk381::verify(&setup, commitment, &public_input, &proof)?);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
 use ark_ec::pairing::Pairing;
@@ -212,21 +213,24 @@ where
     ///
     /// The domain size follows from `pks.len()`; the commitment records it so the verifier
     /// reconstructs the same one.
+    ///
+    /// Fails if a key is the identity or outside G1, if no domain holds this many keys, or if
+    /// `params` are too small to commit to them.
     pub fn commit_keyset(
         params: &PcsParamsOf<C>,
         pks: Vec<C::InnerCurve>,
-    ) -> (KeysetOf<C>, KeysetCommitmentOf<C>) {
+    ) -> Result<(KeysetOf<C>, KeysetCommitmentOf<C>), crate::ApkError> {
         use w3f_pcs::pcs::PcsParams;
-        let keyset = KeysetOf::<C>::new(pks);
-        let commitment = keyset.commit::<C::Pcs>(&params.ck());
-        (keyset, commitment)
+        let keyset = KeysetOf::<C>::new(pks)?;
+        let commitment = keyset.commit::<C::Pcs>(&params.ck())?;
+        Ok((keyset, commitment))
     }
 
     fn prover(
         params: &PcsParamsOf<C>,
         keyset: KeysetOf<C>,
         commitment: &KeysetCommitmentOf<C>,
-    ) -> ProverOf<C> {
+    ) -> Result<ProverOf<C>, crate::ApkError> {
         ProverOf::<C>::new(keyset, commitment, params.clone(), C::transcript())
     }
 
@@ -245,8 +249,8 @@ where
         keyset: KeysetOf<C>,
         commitment: &KeysetCommitmentOf<C>,
         bitmask: crate::Bitmask,
-    ) -> (SimpleProofOf<C>, AccountablePublicInputOf<C>) {
-        Self::prover(params, keyset, commitment).prove_simple(bitmask)
+    ) -> Result<(SimpleProofOf<C>, AccountablePublicInputOf<C>), crate::ApkError> {
+        Self::prover(params, keyset, commitment)?.prove_simple(bitmask)
     }
 
     /// Checks a proof against a claimed aggregate key and bitmask.
@@ -268,8 +272,8 @@ where
         keyset: KeysetOf<C>,
         commitment: &KeysetCommitmentOf<C>,
         bitmask: crate::Bitmask,
-    ) -> (CountingProofOf<C>, CountingPublicInputOf<C>) {
-        Self::prover(params, keyset, commitment).prove_counting(bitmask)
+    ) -> Result<(CountingProofOf<C>, CountingPublicInputOf<C>), crate::ApkError> {
+        Self::prover(params, keyset, commitment)?.prove_counting(bitmask)
     }
 
     /// Checks a counting proof against a claimed aggregate key and signer count.
@@ -301,8 +305,8 @@ where
         keyset: KeysetOf<C>,
         commitment: &KeysetCommitmentOf<C>,
         bitmask: crate::Bitmask,
-    ) -> (PackedProofOf<C>, AccountablePublicInputOf<C>) {
-        Self::prover(params, keyset, commitment).prove_packed(bitmask)
+    ) -> Result<(PackedProofOf<C>, AccountablePublicInputOf<C>), crate::ApkError> {
+        Self::prover(params, keyset, commitment)?.prove_packed(bitmask)
     }
 
     pub fn verify_packed(
@@ -338,9 +342,10 @@ mod tests {
             let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), n).unwrap();
             let pks: Vec<C::InnerCurve> = (0..n).map(|_| C::InnerCurve::rand(rng)).collect();
 
-            let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
+            let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks).unwrap();
             let bitmask = crate::Bitmask::from_bits(&vec![true; n]);
-            let (proof, public_input) = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
+            let (proof, public_input) =
+                Apk::<C>::prove(&params, keyset, &commitment, bitmask).unwrap();
             Apk::<C>::verify(&params, commitment, &public_input, &proof).unwrap()
         }
 

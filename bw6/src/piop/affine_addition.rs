@@ -29,11 +29,11 @@ pub type PartialSumsPolynomials<F> = [DensePolynomial<F>; 2];
 impl<G: AffineRepr> RegisterPolynomials<G> for PartialSumsPolynomials<G::ScalarField> {
     type C = PartialSumsCommitments<G>;
 
-    fn commit<F: Fn(&DensePolynomial<G::ScalarField>) -> G>(
+    fn commit<E, F: Fn(&DensePolynomial<G::ScalarField>) -> Result<G, E>>(
         &self,
         f: F,
-    ) -> PartialSumsCommitments<G> {
-        PartialSumsCommitments(f(&self[0]), f(&self[1]))
+    ) -> Result<PartialSumsCommitments<G>, E> {
+        Ok(PartialSumsCommitments(f(&self[0])?, f(&self[1])?))
     }
 }
 
@@ -61,14 +61,14 @@ pub struct PartialSumsAndBitmaskPolynomials<F: Field> {
 impl<G: AffineRepr> RegisterPolynomials<G> for PartialSumsAndBitmaskPolynomials<G::ScalarField> {
     type C = PartialSumsAndBitmaskCommitments<G>;
 
-    fn commit<F: Clone + Fn(&DensePolynomial<G::ScalarField>) -> G>(
+    fn commit<E, F: Clone + Fn(&DensePolynomial<G::ScalarField>) -> Result<G, E>>(
         &self,
         f: F,
-    ) -> PartialSumsAndBitmaskCommitments<G> {
-        PartialSumsAndBitmaskCommitments {
-            partial_sums: self.partial_sums.commit(f.clone()),
-            bitmask: f(&self.bitmask),
-        }
+    ) -> Result<PartialSumsAndBitmaskCommitments<G>, E> {
+        Ok(PartialSumsAndBitmaskCommitments {
+            partial_sums: self.partial_sums.commit(f.clone())?,
+            bitmask: f(&self.bitmask)?,
+        })
     }
 }
 
@@ -214,7 +214,8 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         OC: CurveGroup<ScalarField = F>,
         OC::ScalarField: From<IC::BaseField>,
     {
-        assert_eq!(bitmask.len(), keyset.size());
+        // Checked by `Prover::prove` before the protocol starts.
+        debug_assert_eq!(bitmask.len(), keyset.size());
         let domain_size = keyset.domain().size();
 
         let h = IC::accumulator_seed().into_group();
@@ -230,12 +231,20 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         let apk_acc: Vec<_> = iter::once(h).chain(apk_acc).collect();
         let mut apk_acc = IC::normalize_batch(&apk_acc);
 
-        apk_acc.resize(domain_size, apk_acc.last().cloned().unwrap());
+        let last = *apk_acc
+            .last()
+            .expect("invariant: the accumulator starts with the seed, so is never empty");
+        apk_acc.resize(domain_size, last);
         let mut apk_acc_x = Vec::with_capacity(apk_acc.len());
         let mut apk_acc_y = Vec::with_capacity(apk_acc.len());
+        // Every accumulator value is `h + S` with `S` in G1 (`Keyset::new` rejects keys outside
+        // it) and `h` outside G1, so none is the identity and all have affine coordinates.
         apk_acc.iter().for_each(|p| {
-            apk_acc_x.push((p.x().expect("invalid point")).into());
-            apk_acc_y.push((p.y().expect("invalid point")).into());
+            let (x, y) = p
+                .xy()
+                .expect("invariant: h + S is never the identity for S in G1");
+            apk_acc_x.push(x.into());
+            apk_acc_y.push(y.into());
         });
 
         let mut bitmask = bitmask.to_vec();
@@ -277,7 +286,9 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         Self {
             domains,
             bitmask,
-            keyset: keyset.pks_evals_x4.unwrap(),
+            keyset: keyset
+                .pks_evals_x4
+                .expect("invariant: Prover::new amplifies the keyset before any proof"),
             partial_sums,
             polynomials: AffineAdditionPolynomials {
                 bitmask: bitmask_polynomial,
@@ -572,7 +583,7 @@ mod tests {
 
         let good_bitmask = _random_bits(m, 0.5, rng);
         let pks: Vec<InnerCurve> = random_pks::<_, InnerCurve>(m, rng);
-        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(pks);
+        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(pks).unwrap();
         keyset.amplify();
         let registers =
             AffineAdditionRegisters::new(domains.clone(), keyset.clone(), &good_bitmask);
@@ -615,7 +626,7 @@ mod tests {
         let m = n - 1;
         let domains = TestDomains::new(n);
 
-        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
         keyset.amplify();
         let registers =
             AffineAdditionRegisters::new(domains.clone(), keyset, &_random_bits(m, 0.5, rng));
@@ -638,7 +649,7 @@ mod tests {
 
         let bits = _random_bits(m, 0.5, rng);
 
-        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<InnerCurve, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
         keyset.amplify();
         let registers = AffineAdditionRegisters::new(domains.clone(), keyset.clone(), &bits);
         let constraint_polys =
@@ -650,7 +661,7 @@ mod tests {
         assert!(domains.is_zero(&constraint_polys.0));
         assert!(domains.is_zero(&constraint_polys.1));
 
-        let apk = keyset.aggregate(&bits).into_affine();
+        let apk = keyset.aggregate(&bits).unwrap().into_affine();
         let zeta = Fr::rand(rng);
         let evals_at_zeta = utils::lagrange_evaluations(zeta, registers.domains.domain());
         let acc_polys = registers.get_register_polynomials().partial_sums;

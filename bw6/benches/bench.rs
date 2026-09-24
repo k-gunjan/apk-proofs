@@ -167,7 +167,7 @@ fn verification(c: &mut Criterion) {
         let keyset_size = (2u32.pow(log_domain_size) - 1) as usize;
         let pks: Vec<InnerCurve> = (0..keyset_size).map(|_| InnerCurve::rand(rng)).collect();
 
-        let keyset = Keyset::<InnerCurve, OuterCurve, BenchDomain>::new(pks);
+        let keyset = Keyset::<InnerCurve, OuterCurve, BenchDomain>::new(pks).unwrap();
 
         let pcs_params = setup::params_for_keyset::<_, TestPCS, BenchDomain, _>(
             // Insecure source: fine for a benchmark.
@@ -175,7 +175,7 @@ fn verification(c: &mut Criterion) {
             keyset_size,
         )
         .unwrap();
-        let pks_comm = keyset.commit::<TestPCS>(&pcs_params.ck());
+        let pks_comm = keyset.commit::<TestPCS>(&pcs_params.ck()).unwrap();
 
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);
 
@@ -184,11 +184,12 @@ fn verification(c: &mut Criterion) {
             &pks_comm,
             pcs_params.clone(),
             Bls12_377Config::transcript(),
-        );
+        )
+        .unwrap();
 
-        let proof_basic = prover.prove_simple(bitmask.clone());
-        let proof_packed = prover.prove_packed(bitmask.clone());
-        let proof_counting = prover.prove_counting(bitmask.clone());
+        let proof_basic = prover.prove_simple(bitmask.clone()).unwrap();
+        let proof_packed = prover.prove_packed(bitmask.clone()).unwrap();
+        let proof_counting = prover.prove_counting(bitmask.clone()).unwrap();
 
         let create_verifier = || {
             Verifier::<InnerCurve, OuterCurve, TestPCS, BenchDomain>::new(

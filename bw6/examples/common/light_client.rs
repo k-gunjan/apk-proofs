@@ -50,7 +50,7 @@ use apk_proofs::config::{
     AccountablePublicInputOf, Apk, ApkConfig, KeysetCommitmentOf, PcsParamsOf, ScalarOf,
     SimpleProofOf,
 };
-use apk_proofs::{hash_to_curve, Bitmask, CommitmentExt};
+use apk_proofs::{hash_to_curve, ApkError, Bitmask, CommitmentExt};
 
 type Inner<C> = <C as ApkConfig>::InnerPairing;
 type G2Of<C> = <Inner<C> as Pairing>::G2;
@@ -121,7 +121,9 @@ where
 
     fn approve(&self, new_validator_set: &ValidatorSet<C>, params: &PcsParamsOf<C>) -> Approval<C> {
         let new_validator_set_commitment = shared_keyset_commitment::<C, _>(|| {
-            Apk::<C>::commit_keyset(params, new_validator_set.raw_public_keys()).1
+            Apk::<C>::commit_keyset(params, new_validator_set.raw_public_keys())
+                .expect("validators only approve well-formed validator sets")
+                .1
         });
         let message = hash_commitment::<C>(&new_validator_set_commitment);
         Approval {
@@ -313,12 +315,15 @@ where
         &mut self,
         new_validator_set: ValidatorSet<C>,
         approvals: Vec<Approval<C>>,
-    ) -> (
-        AccountablePublicInputOf<C>,
-        SimpleProofOf<C>,
-        Signature<Inner<C>>,
-        KeysetCommitmentOf<C>,
-    ) {
+    ) -> Result<
+        (
+            AccountablePublicInputOf<C>,
+            SimpleProofOf<C>,
+            Signature<Inner<C>>,
+            KeysetCommitmentOf<C>,
+        ),
+        ApkError,
+    > {
         let t_approval = start_timer!(|| {
             format!(
             "Helper aggregates {} individual signatures on the same commitment and generates accountable light client proof",
@@ -326,7 +331,11 @@ where
         )
         });
 
-        let new_validator_set_commitment = approvals[0].comm.clone();
+        let new_validator_set_commitment = approvals
+            .first()
+            .ok_or(ApkError::NoSigners)?
+            .comm
+            .clone();
         // Compared as group elements rather than through a HashSet: `PublicKey<E>`'s derived
         // `Hash` would demand `E: Hash`, which no pairing implements.
         let actual_signers: Vec<C::InnerCurve> =
@@ -341,13 +350,13 @@ where
         // The keyset is rebuilt from the current validator set rather than cached, because the
         // proof must be against exactly the set the light client has committed to.
         let (keyset, _) =
-            Apk::<C>::commit_keyset(&self.params, self.current_validator_set.raw_public_keys());
+            Apk::<C>::commit_keyset(&self.params, self.current_validator_set.raw_public_keys())?;
         let (proof, public_input) = Apk::<C>::prove(
             &self.params,
             keyset,
             &self.current_validator_set_commitment,
             Bitmask::from_bits(&actual_signers_bitmask),
-        );
+        )?;
 
         let signatures = approvals.iter().map(|a| &a.sig);
         let aggregate_signature = Signature::aggregate(signatures);
@@ -358,12 +367,12 @@ where
         end_timer!(t_approval);
         println!();
 
-        (
+        Ok((
             public_input,
             proof,
             aggregate_signature,
             new_validator_set_commitment,
-        )
+        ))
     }
 }
 
@@ -420,7 +429,8 @@ where
     ));
     let genesis_validator_set = ValidatorSet::<C>::new(validator_set_size, quorum, rng);
     let (_, genesis_validator_set_commitment) =
-        Apk::<C>::commit_keyset(&params, genesis_validator_set.raw_public_keys());
+        Apk::<C>::commit_keyset(&params, genesis_validator_set.raw_public_keys())
+            .expect("genesis validator set is well-formed");
     end_timer!(t_genesis);
 
     let mut helper = TrustlessHelper::<C>::new(
@@ -437,8 +447,16 @@ where
         let (new_validator_set, approvals) =
             current_validator_set.rotate(&light_client.params, rng);
 
+        // A helper runs this once per block and must outlive a bad one: log the failure and
+        // wait for the next round rather than taking the process down.
         let (public_input, proof, aggregate_signature, new_validator_set_commitment) =
-            helper.aggregate_approvals(new_validator_set.clone(), approvals);
+            match helper.aggregate_approvals(new_validator_set.clone(), approvals) {
+                Ok(out) => out,
+                Err(e) => {
+                    eprintln!("era {}: skipping, could not produce a proof: {}", era, e);
+                    continue;
+                }
+            };
 
         light_client.verify_aggregates(
             public_input,

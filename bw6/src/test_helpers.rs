@@ -60,7 +60,7 @@ where
     let rng = &mut test_rng();
     let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
     let t = start_timer!(|| "signer set commitment");
-    let out = Apk::<C>::commit_keyset(params, pks);
+    let out = Apk::<C>::commit_keyset(params, pks).unwrap();
     end_timer!(t);
     out
 }
@@ -89,7 +89,7 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
     let (keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let t_prover_new = start_timer!(|| "prover precomputation");
-    let prover = ProverOf::<C>::new(keyset, &pks_comm, params.clone(), C::transcript());
+    let prover = ProverOf::<C>::new(keyset, &pks_comm, params.clone(), C::transcript()).unwrap();
     end_timer!(t_prover_new);
 
     let verifier = VerifierOf::<C>::new(params.raw_vk(), pks_comm, C::transcript());
@@ -157,7 +157,7 @@ where
             keyset_size,
         )
         .unwrap(),
-        |prover, bitmask| prover.prove_simple(bitmask),
+        |prover, bitmask| prover.prove_simple(bitmask).unwrap(),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
         keyset_size,
         proof_size(5, 6, group_bytes),
@@ -180,7 +180,7 @@ where
             keyset_size,
         )
         .unwrap(),
-        |prover, bitmask| prover.prove_counting(bitmask),
+        |prover, bitmask| prover.prove_counting(bitmask).unwrap(),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
         keyset_size,
         proof_size(7, 8, group_bytes),
@@ -206,7 +206,7 @@ pub fn test_packed_scheme(keyset_size: usize) {
             keyset_size,
         )
         .unwrap(),
-        |prover, bitmask| prover.prove_packed(bitmask),
+        |prover, bitmask| prover.prove_packed(bitmask).unwrap(),
         |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
         keyset_size,
         proof_size(8, 9, GROUP_BYTES_761),
@@ -280,7 +280,7 @@ where
 
     let bits: Vec<bool> = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect();
     let (proof, public_input) =
-        Apk::<C>::prove(&params, keyset, &pks_comm, Bitmask::from_bits(&bits));
+        Apk::<C>::prove(&params, keyset, &pks_comm, Bitmask::from_bits(&bits)).unwrap();
 
     // Sanity: the honest claim verifies, so any failure below is caused by the tampering.
     assert!(
@@ -383,7 +383,7 @@ pub fn test_rejects_bad_domain_size_381(keyset_size: usize) {
 /// An SRS generated for one keyset size, used with a larger one.
 ///
 /// Nothing ties `Apk::setup`'s argument to the length of the vector handed to `commit_keyset`,
-/// so this is a caller mistake the crate has to report well. It used to surface as an `unwrap`
+/// so this is a caller mistake the crate has to report well. It used to surface as a panic
 /// on an opaque `Err(())` inside a commit closure, long after `commit_keyset` had cheerfully
 /// succeeded: the keyset polynomials are degree `n - 1` and fit, while the quotient at `3n - 3`
 /// does not.
@@ -396,22 +396,23 @@ pub fn test_undersized_srs_is_reported_at_prover_construction() {
     let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), 255).unwrap();
     let pks = random_pks::<_, <C as ApkConfig>::InnerCurve>(300, rng);
 
-    let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
-        let bitmask = Bitmask::from_bits(&vec![true; 300]);
-        let _ = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
-    }))
-    .expect_err("proving against an undersized SRS must not succeed");
+    // The keyset polynomials (degree 511) still fit, so committing succeeds; the quotient
+    // (degree 1533) does not, and the prover has to say so before doing any work.
+    let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks).unwrap();
+    let bitmask = Bitmask::from_bits(&vec![true; 300]);
+    let err = Apk::<C>::prove(&params, keyset, &commitment, bitmask)
+        .err()
+        .expect("proving against an undersized SRS must not succeed");
 
-    let message = panic
-        .downcast_ref::<String>()
-        .map(String::as_str)
-        .unwrap_or("<not a string>");
-    assert!(
-        message.contains("SRS too small") && message.contains("degree 1533"),
-        "the failure must name the degree it needed, got: {}",
-        message
+    assert_eq!(
+        err,
+        crate::ApkError::SrsTooSmall {
+            domain_size: 512,
+            required_degree: 1533,
+            available_degree: 765,
+        }
     );
+    assert!(err.to_string().contains("SRS too small"));
 }
 
 /// One function body, both curves — the same four calls, with only the config type changed.
@@ -429,9 +430,10 @@ pub fn test_config_driven_api() {
         let params =
             Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), keyset_size).unwrap();
         let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
-        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks).unwrap();
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);
-        let (proof, public_input) = Apk::<C>::prove(&params, keyset, &commitment, bitmask);
+        let (proof, public_input) =
+            Apk::<C>::prove(&params, keyset, &commitment, bitmask).unwrap();
         Apk::<C>::verify(&params, commitment, &public_input, &proof).unwrap()
     }
 

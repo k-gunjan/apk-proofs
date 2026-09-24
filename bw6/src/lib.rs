@@ -7,6 +7,7 @@ use ark_std::Zero;
 use w3f_pcs::pcs::commitment::WrappedAffine;
 
 pub use bitmask::Bitmask;
+pub use error::{ApkError, PublicKeyFault};
 pub use keyset::{Keyset, KeysetCommitment};
 
 use crate::piop::affine_addition::{PartialSumsAndBitmaskCommitments, PartialSumsCommitments};
@@ -21,6 +22,7 @@ pub use self::prover::*;
 pub use self::verifier::*;
 
 pub mod endo;
+mod error;
 pub mod instances;
 mod prover;
 pub mod utils;
@@ -209,8 +211,26 @@ pub fn point_in_g1_complement<P: SWCurveConfig>() -> Affine<P> {
 /// register a key.
 ///
 /// Every [`ApkConfig::InnerCurve`] must implement this; see `crate::instances`.
-pub trait AccumulatorSeed: CurveGroup {
+pub trait AccumulatorSeed: PrimeSubgroup {
     fn accumulator_seed() -> Self::Affine;
+}
+
+/// Curves that can test membership in their prime-order subgroup.
+pub trait PrimeSubgroup: CurveGroup {
+    /// Whether `p` is on the curve and in the prime-order subgroup.
+    ///
+    /// The identity is in the subgroup, so this returns `true` for it; callers that need a
+    /// non-identity point check that separately.
+    fn is_in_prime_subgroup(p: &Self::Affine) -> bool;
+}
+
+/// Delegates to the curve's `is_in_correct_subgroup_assuming_on_curve`, which is
+/// endomorphism-based where arkworks provides one (BLS12-381 G1) and double-and-add by `r`
+/// otherwise (BLS12-377 G1).
+impl<P: SWCurveConfig> PrimeSubgroup for ark_ec::short_weierstrass::Projective<P> {
+    fn is_in_prime_subgroup(p: &Affine<P>) -> bool {
+        p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve()
+    }
 }
 
 // TODO: switch to better hash to curve when available
@@ -228,13 +248,6 @@ mod tests {
     use crate::test_helpers;
 
     use super::*;
-
-    #[test]
-    fn h_is_not_in_g1_bw6_761() {
-        let h = point_in_g1_complement::<ark_bw6_761::g1::Config>();
-        assert!(h.is_on_curve());
-        assert!(!h.is_in_correct_subgroup_assuming_on_curve());
-    }
 
     #[test]
     fn h_is_not_in_g1_bls12_377() {

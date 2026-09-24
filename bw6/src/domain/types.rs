@@ -140,6 +140,8 @@ impl core::fmt::Display for DomainError {
     }
 }
 
+impl std::error::Error for DomainError {}
+
 /// Marks domains that can supply the sizes the `packed` scheme needs.
 ///
 /// `packed` splits the bitmask into 256-bit chunks and asserts `256 | n`. Only a radix-2 domain

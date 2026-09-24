@@ -49,8 +49,14 @@ impl<F: Field> BitmaskPackingPolynomials<F> {
 impl<G: AffineRepr> RegisterPolynomials<G> for BitmaskPackingPolynomials<G::ScalarField> {
     type C = BitmaskPackingCommitments<G>;
 
-    fn commit<F: Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: F) -> Self::C {
-        BitmaskPackingCommitments::<G>::new(f(&self.c_poly), f(&self.acc_poly))
+    fn commit<E, F: Fn(&DensePolynomial<G::ScalarField>) -> Result<G, E>>(
+        &self,
+        f: F,
+    ) -> Result<Self::C, E> {
+        Ok(BitmaskPackingCommitments::<G>::new(
+            f(&self.c_poly)?,
+            f(&self.acc_poly)?,
+        ))
     }
 }
 

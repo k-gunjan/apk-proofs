@@ -39,11 +39,14 @@ pub struct CountingPolynomials<F: FftField> {
 impl<G: AffineRepr> RegisterPolynomials<G> for CountingPolynomials<G::ScalarField> {
     type C = CountingCommitments<G>;
 
-    fn commit<FN: Clone + Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: FN) -> Self::C {
-        CountingCommitments {
-            affine_addition_commitments: self.affine_addition_polynomials.commit(f.clone()),
-            partial_counts_commitment: f(&self.partial_counts_polynomial),
-        }
+    fn commit<E, FN: Clone + Fn(&DensePolynomial<G::ScalarField>) -> Result<G, E>>(
+        &self,
+        f: FN,
+    ) -> Result<Self::C, E> {
+        Ok(CountingCommitments {
+            affine_addition_commitments: self.affine_addition_polynomials.commit(f.clone())?,
+            partial_counts_commitment: f(&self.partial_counts_polynomial)?,
+        })
     }
 }
 
@@ -245,7 +248,7 @@ mod tests {
         let m = n - 1;
 
         let pcs_params = Pcs::setup(m, rng);
-        let mut keyset = Keyset::<G1Projective, OuterCurve, TestDomain>::new(random_pks(m, rng));
+        let mut keyset = Keyset::<G1Projective, OuterCurve, TestDomain>::new(random_pks(m, rng)).unwrap();
         keyset.amplify();
 
         let mut scheme: CountingScheme<Fr, TestDomain> =
@@ -263,7 +266,8 @@ mod tests {
             Pcs,
             TestDomain,
         >>::get_register_polynomials_to_commit1(&scheme)
-        .commit(|p| Pcs::commit(&pcs_params.ck(), &p).unwrap().0)
+        .commit(|p| Pcs::commit(&pcs_params.ck(), &p).map(|c| c.0))
+        .unwrap()
         .as_vec();
         let actual_evaluations = <CountingScheme<Fr, TestDomain> as ProverProtocol<
             G1Projective,

@@ -6,7 +6,7 @@ use w3f_pcs::pcs::PCS;
 
 use crate::domain::{DomainSet, FftDomain};
 use crate::domains::Domains;
-use crate::{utils, AccumulatorSeed, Bitmask, Keyset, PublicInput};
+use crate::{utils, AccumulatorSeed, ApkError, Bitmask, Keyset, PublicInput};
 
 pub mod affine_addition;
 pub mod bit_counting;
@@ -22,7 +22,10 @@ pub trait RegisterCommitments<G: AffineRepr>: CanonicalSerialize + CanonicalDese
 
 pub trait RegisterPolynomials<G: AffineRepr> {
     type C: RegisterCommitments<G>;
-    fn commit<Comm: Clone + Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, f: Comm) -> Self::C;
+    fn commit<E, Comm: Clone + Fn(&DensePolynomial<G::ScalarField>) -> Result<G, E>>(
+        &self,
+        f: Comm,
+    ) -> Result<Self::C, E>;
 }
 
 impl<G: AffineRepr> RegisterCommitments<G> for () {
@@ -34,8 +37,11 @@ impl<G: AffineRepr> RegisterCommitments<G> for () {
 impl<G: AffineRepr> RegisterPolynomials<G> for () {
     type C = ();
 
-    fn commit<F: Fn(&DensePolynomial<G::ScalarField>) -> G>(&self, _f: F) -> Self::C {
-        ()
+    fn commit<E, F: Fn(&DensePolynomial<G::ScalarField>) -> Result<G, E>>(
+        &self,
+        _f: F,
+    ) -> Result<Self::C, E> {
+        Ok(())
     }
 }
 
@@ -133,11 +139,13 @@ where
         &self,
         phi: OC::ScalarField,
         domain: &D::Domain,
-    ) -> DensePolynomial<OC::ScalarField> {
+    ) -> Result<DensePolynomial<OC::ScalarField>, ApkError> {
         let w = utils::randomize(phi, &self.compute_constraint_polynomials());
         let (q_poly, r) = domain.divide_by_vanishing_poly(&w);
-        assert_eq!(r, DensePolynomial::zero());
-        q_poly
+        if !r.is_zero() {
+            return Err(ApkError::ConstraintsNotSatisfied);
+        }
+        Ok(q_poly)
     }
 
     fn evaluate_register_polynomials(&mut self, point: OC::ScalarField) -> Self::E;
