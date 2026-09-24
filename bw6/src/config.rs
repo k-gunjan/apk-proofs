@@ -15,8 +15,11 @@
 //! use apk_proofs::{Apk381, Bitmask};
 //! # let pks: Vec<ark_bls12_381::G1Projective> = unimplemented!();
 //! # let bitmask: Bitmask = unimplemented!();
+//! # use apk_proofs::setup::InsecureSetup;
 //! let rng = &mut ark_std::test_rng();
-//! let setup = Apk381::setup(1000, rng);                      // validators, not log2(anything)
+//! // Insecure source: samples the trapdoor locally, so tests only (`test-utils`). Production
+//! // parameters must come from a trusted-setup ceremony; see `crate::setup`.
+//! let setup = Apk381::setup(&mut InsecureSetup::new(rng), 1000).unwrap(); // validators, not log2(anything)
 //! let (keyset, commitment) = Apk381::commit_keyset(&setup, pks);
 //! let (proof, public_input) = Apk381::prove(&setup, keyset, &commitment, bitmask);
 //! assert!(Apk381::verify(&setup, commitment, &public_input, &proof).unwrap());
@@ -24,7 +27,6 @@
 
 use ark_ec::pairing::Pairing;
 use ark_ec::CurveGroup;
-use ark_ff::PrimeField;
 use w3f_pcs::pcs::PCS;
 
 use crate::domain::DomainSet;
@@ -60,16 +62,6 @@ pub trait ApkConfig: 'static + Sized {
     /// The `n, 2n, kn` triple of evaluation domains, and the shift that goes with them. This is
     /// the component that cannot be shared between configurations: see [`crate::domain`].
     type Domains: DomainSet<ScalarOf<Self>>;
-
-    /// Produces commitment-scheme parameters supporting polynomials up to `max_degree`.
-    ///
-    /// A hook rather than a straight call to `Pcs::setup` because w3f-pcs's KZG setup asserts
-    /// `n <= 2^TWO_ADICITY`, which BW6-767 cannot satisfy. See
-    /// [`crate::instances::bls12_381_bw6_767::kzg::generate_urs`].
-    fn generate_pcs_params<R: rand::Rng>(
-        max_degree: usize,
-        rng: &mut R,
-    ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params;
 
     /// A fresh Fiat-Shamir transcript for this configuration.
     ///
@@ -131,24 +123,6 @@ pub type AccountablePublicInputOf<C> = crate::AccountablePublicInput<<C as ApkCo
 pub type CountingPublicInputOf<C> = crate::CountingPublicInput<<C as ApkConfig>::InnerCurve>;
 pub type PcsParamsOf<C> = <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Params;
 
-/// Generates commitment-scheme parameters big enough for `keyset_size` public keys.
-///
-/// The domain set, not the caller, decides the realised size; see [`crate::setup`].
-pub fn setup_for_keyset<C, R>(keyset_size: usize, rng: &mut R) -> PcsParamsOf<C>
-where
-    C: ApkConfig,
-    R: rand::Rng,
-    ScalarOf<C>: PrimeField,
-{
-    use crate::domain::FftDomain;
-    // The additional slot is occupied by the affine addition accumulator's initial value.
-    let domains = <C::Domains as DomainSet<ScalarOf<C>>>::for_min_size(keyset_size + 1)
-        .expect("no evaluation domain large enough for this keyset");
-    // The prover commits to the quotient q = aggregate_constraint / vanishing. The highest
-    // constraint degree is 4n - 3, so deg(q) = 3n - 3.
-    C::generate_pcs_params(3 * domains.base().size() - 3, rng)
-}
-
 /// BLS12-377 signatures, proofs over BW6-761, KZG commitments, radix-2 domains.
 ///
 /// BW6-761's scalar field has two-adicity 46, so power-of-two domains exist for every size the
@@ -163,13 +137,6 @@ impl ApkConfig for Bls12_377Config {
     type OuterCurve = crate::instances::bls12_377_bw6_761::OuterCurve;
     type Pcs = crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761;
     type Domains = crate::instances::bls12_377_bw6_761::Domains761;
-
-    fn generate_pcs_params<R: rand::Rng>(
-        max_degree: usize,
-        rng: &mut R,
-    ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params {
-        <Self::Pcs as PCS<ScalarOf<Self>>>::setup(max_degree, rng)
-    }
 }
 
 /// BLS12-381 signatures, proofs over BW6-767, KZG commitments, mixed-radix domains.
@@ -191,13 +158,6 @@ impl ApkConfig for Bls12_381Config {
     type OuterCurve = crate::instances::bls12_381_bw6_767::OuterCurve;
     type Pcs = crate::instances::bls12_381_bw6_767::kzg::Pcs;
     type Domains = crate::instances::bls12_381_bw6_767::Domains767;
-
-    fn generate_pcs_params<R: rand::Rng>(
-        max_degree: usize,
-        rng: &mut R,
-    ) -> <Self::Pcs as PCS<ScalarOf<Self>>>::Params {
-        crate::instances::bls12_381_bw6_767::kzg::generate_urs(max_degree, rng)
-    }
 }
 
 /// The APK proof system for a configuration.
@@ -220,13 +180,19 @@ where
         crate::CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
 {
-    /// Commitment-scheme parameters for a validator set of `keyset_size` keys.
+    /// Commitment-scheme parameters for a validator set of `keyset_size` keys, from `source`.
     ///
     /// `keyset_size` is the number of validators, not a logarithm and not a domain size: which
     /// domain that implies is the configuration's business, and on APK-381 it is not a power of
     /// two. Read it back with [`Apk::domain_size`] for ref.
-    pub fn setup<R: rand::Rng>(keyset_size: usize, rng: &mut R) -> PcsParamsOf<C> {
-        setup_for_keyset::<C, R>(keyset_size, rng)
+    ///
+    /// Whether the result is fit for production is the source's business, not this function's.
+    /// See [`crate::setup`].
+    pub fn setup<P: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>>(
+        source: &mut P,
+        keyset_size: usize,
+    ) -> Result<PcsParamsOf<C>, crate::setup::SetupError<P::Error>> {
+        crate::setup::params_for_keyset::<ScalarOf<C>, C::Pcs, C::Domains, P>(source, keyset_size)
     }
 
     /// The trace domain size this configuration will use for `keyset_size` validators.
@@ -365,9 +331,11 @@ mod tests {
             <C::Pcs as PCS<ScalarOf<C>>>::C: crate::CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine>
                 + Clone,
             PcsParamsOf<C>: Clone,
+            crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
         {
             let rng = &mut test_rng();
-            let params = Apk::<C>::setup(n, rng);
+            // Insecure source: fine for a test.
+            let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), n).unwrap();
             let pks: Vec<C::InnerCurve> = (0..n).map(|_| C::InnerCurve::rand(rng)).collect();
 
             let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);

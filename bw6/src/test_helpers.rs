@@ -55,6 +55,7 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
 {
     let rng = &mut test_rng();
     let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
@@ -78,6 +79,7 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     ProofT: CanonicalSerialize + CanonicalDeserialize,
     PI: PublicInput<C::InnerCurve>,
     P: Fn(ProverOf<C>, Bitmask) -> (ProofT, PI),
@@ -146,9 +148,15 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
 {
     _test_prove_verify::<C, SimpleProofOf<C>, AccountablePublicInputOf<C>, _, _>(
-        Apk::<C>::setup(keyset_size, &mut test_rng()),
+        // Insecure source (trapdoor sampled locally): tests only.
+        Apk::<C>::setup(
+            &mut crate::setup::InsecureSetup::new(&mut test_rng()),
+            keyset_size,
+        )
+        .unwrap(),
         |prover, bitmask| prover.prove_simple(bitmask),
         |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
         keyset_size,
@@ -163,9 +171,15 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
 {
     _test_prove_verify::<C, CountingProofOf<C>, CountingPublicInputOf<C>, _, _>(
-        Apk::<C>::setup(keyset_size, &mut test_rng()),
+        // Insecure source (trapdoor sampled locally): tests only.
+        Apk::<C>::setup(
+            &mut crate::setup::InsecureSetup::new(&mut test_rng()),
+            keyset_size,
+        )
+        .unwrap(),
         |prover, bitmask| prover.prove_counting(bitmask),
         |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
         keyset_size,
@@ -186,7 +200,12 @@ pub fn test_counting_scheme(keyset_size: usize) {
 pub fn test_packed_scheme(keyset_size: usize) {
     type C = Bls12_377Config;
     _test_prove_verify::<C, PackedProofOf<C>, AccountablePublicInputOf<C>, _, _>(
-        Apk::<C>::setup(keyset_size, &mut test_rng()),
+        // Insecure source (trapdoor sampled locally): tests only.
+        Apk::<C>::setup(
+            &mut crate::setup::InsecureSetup::new(&mut test_rng()),
+            keyset_size,
+        )
+        .unwrap(),
         |prover, bitmask| prover.prove_packed(bitmask),
         |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
         keyset_size,
@@ -252,9 +271,11 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
 {
     let rng = &mut test_rng();
-    let params = Apk::<C>::setup(keyset_size, rng);
+    // Insecure source (trapdoor sampled locally): tests only.
+    let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), keyset_size).unwrap();
     let (keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let bits: Vec<bool> = (0..keyset_size).map(|_| rng.gen_bool(2.0 / 3.0)).collect();
@@ -313,9 +334,11 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
 {
     let rng = &mut test_rng();
-    let params = Apk::<C>::setup(keyset_size, rng);
+    // Insecure source (trapdoor sampled locally): tests only.
+    let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), keyset_size).unwrap();
     let (_keyset, pks_comm) = keyset_and_commitment::<C>(&params, keyset_size);
 
     let mut not_exact = pks_comm.clone();
@@ -369,7 +392,8 @@ pub fn test_undersized_srs_is_reported_at_prover_construction() {
     type C = Bls12_377Config;
 
     // 255 keys need a domain of 256; 300 need 512, and so an SRS three times larger.
-    let params = Apk::<C>::setup(255, rng);
+    // Insecure source (trapdoor sampled locally): tests only.
+    let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), 255).unwrap();
     let pks = random_pks::<_, <C as ApkConfig>::InnerCurve>(300, rng);
 
     let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -398,9 +422,12 @@ pub fn test_config_driven_api() {
         <C::Pcs as PCS<ScalarOf<C>>>::C:
             CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
         PcsParamsOf<C>: Clone,
+        crate::setup::InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     {
         let rng = &mut test_rng();
-        let params = Apk::<C>::setup(keyset_size, rng);
+        // Insecure source (trapdoor sampled locally): tests only.
+        let params =
+            Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), keyset_size).unwrap();
         let pks = random_pks::<_, C::InnerCurve>(keyset_size, rng);
         let (keyset, commitment) = Apk::<C>::commit_keyset(&params, pks);
         let bitmask = Bitmask::from_bits(&vec![true; keyset_size]);

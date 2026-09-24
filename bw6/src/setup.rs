@@ -1,40 +1,144 @@
+//! Commitment-scheme parameters (the SRS) for a validator set.
+//!
+//! Where the parameters come from is abstracted as [`PcsSetup`], and the sizing — which domain a
+//! validator set implies, and so which degree the parameters must reach — is done once, here,
+//! for every source.
+//!
+//! The only source so far is [`InsecureSetup`], which samples the KZG trapdoor `tau` locally.
+//! Whoever knows `tau` can open any commitment to any value, i.e. forge every proof, so it is
+//! compiled only for this crate's tests and under the `test-utils` feature. Production
+//! parameters have to come from a trusted-setup ceremony, through a source still to be designed
+//! that implements the same trait.
+
 use ark_ff::PrimeField;
-use rand::Rng;
 use w3f_pcs::pcs::{CommitterKey, PcsParams, PCS};
 
-use crate::domain::{DomainSet, FftDomain};
+use crate::domain::{DomainError, DomainSet, FftDomain};
 
-/// Generate PCS parameters for a keyset of the given size.
-pub fn generate_for_keyset<R, F, S, D>(keyset_size: usize, rng: &mut R) -> S::Params
+/// A source of commitment-scheme parameters for the scheme `S` over the field `F`.
+pub trait PcsSetup<F: PrimeField, S: PCS<F>> {
+    /// Why this source could not produce parameters.
+    type Error: core::fmt::Debug;
+
+    /// Parameters supporting polynomials up to `max_degree`.
+    fn params(&mut self, max_degree: usize) -> Result<S::Params, Self::Error>;
+}
+
+/// Why parameters for a validator set could not be produced.
+#[derive(Debug)]
+pub enum SetupError<E> {
+    /// No evaluation domain exists for the requested size.
+    NoDomain(DomainError),
+    /// The parameter source failed.
+    Source(E),
+}
+
+impl<E: core::fmt::Display> core::fmt::Display for SetupError<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            SetupError::NoDomain(e) => write!(f, "{}", e),
+            SetupError::Source(e) => write!(f, "{}", e),
+        }
+    }
+}
+
+/// Parameters for a keyset of `keyset_size` public keys, from `source`.
+pub fn params_for_keyset<F, S, D, P>(
+    source: &mut P,
+    keyset_size: usize,
+) -> Result<S::Params, SetupError<P::Error>>
 where
-    R: Rng,
     F: PrimeField,
     S: PCS<F>,
     D: DomainSet<F>,
+    P: PcsSetup<F, S>,
 {
     // The additional slot is occupied by the affine addition accumulator's initial value.
-    generate_for_domain::<R, F, S, D>(keyset_size + 1, rng)
+    params_for_domain::<F, S, D, P>(source, keyset_size + 1)
 }
 
-/// Generate PCS parameters sufficient for a domain of at least `min_domain_size`.
+/// Parameters sufficient for a domain of at least `min_domain_size`, from `source`.
 ///
 /// The domain set, not the caller, decides the realized size: `for_min_size` rounds up to the
 /// next size the field supports, and the SRS is sized against that. Whether such a domain exists
 /// at all is the domain implementation's business — for a radix-2 field that is a two-adicity
 /// question, for BW6-767 it is a question of which divisors of `q - 1` are reachable — so the
 /// failure surfaces from `for_min_size` rather than from a two-adicity assertion here.
-pub fn generate_for_domain<R, F, S, D>(min_domain_size: usize, rng: &mut R) -> S::Params
+pub fn params_for_domain<F, S, D, P>(
+    source: &mut P,
+    min_domain_size: usize,
+) -> Result<S::Params, SetupError<P::Error>>
 where
-    R: Rng,
     F: PrimeField,
     S: PCS<F>,
     D: DomainSet<F>,
+    P: PcsSetup<F, S>,
 {
     let domain_size = D::for_min_size(min_domain_size)
-        .expect("no evaluation domain of the requested size")
+        .map_err(SetupError::NoDomain)?
         .base()
         .size();
-    S::setup(highest_degree_to_commit(domain_size), rng)
+    source
+        .params(highest_degree_to_commit(domain_size))
+        .map_err(SetupError::Source)
+}
+
+/// **Insecure, test-only.** A parameter source that samples the trapdoor locally.
+///
+/// Parameters from here are only as secret as the rng that made them: whoever holds it can forge
+/// every proof. See the [module docs](self).
+#[cfg(any(test, feature = "test-utils"))]
+pub struct InsecureSetup {
+    rng: ark_std::rand::rngs::StdRng,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+impl InsecureSetup {
+    /// Seeds the source's own rng from `rng`, so the caller keeps using theirs afterwards.
+    pub fn new<R: ark_std::rand::RngCore + ?Sized>(rng: &mut R) -> Self {
+        use ark_std::rand::SeedableRng;
+        let mut seed = [0u8; 32];
+        rng.fill_bytes(&mut seed);
+        InsecureSetup {
+            rng: ark_std::rand::rngs::StdRng::from_seed(seed),
+        }
+    }
+}
+
+/// KZG over any pairing, BW6-761 and BW6-767 alike.
+///
+/// Not a call to upstream's `KZG::setup`: that delegates to `URS::from_trapdoor`, which asserts
+/// `n <= 2^TWO_ADICITY`, and BW6-767's scalar field has two-adicity 1. The assertion is a policy
+/// guard, not a mathematical constraint — generating a URS is powers of tau and one batch
+/// multiplication, and the KZG operations this crate uses are multi-scalar multiplications and
+/// pairings; only w3f-pcs's optional Lagrangian committer key needs a radix-2 domain, and this
+/// crate never asks for one. So this reimplements `from_trapdoor` minus the assertion.
+#[cfg(any(test, feature = "test-utils"))]
+impl<E: ark_ec::pairing::Pairing> PcsSetup<E::ScalarField, w3f_pcs::pcs::kzg::KZG<E>>
+    for InsecureSetup
+{
+    type Error = core::convert::Infallible;
+
+    fn params(&mut self, max_degree: usize) -> Result<w3f_pcs::pcs::kzg::urs::URS<E>, Self::Error> {
+        use ark_ec::ScalarMul;
+        use ark_ff::One;
+
+        let n1 = max_degree + 1;
+        let n2 = 2;
+        let (tau, g1, g2) = w3f_pcs::pcs::kzg::urs::URS::<E>::random_params(&mut self.rng);
+
+        let mut powers_of_tau = Vec::with_capacity(n1.max(n2));
+        let mut power = E::ScalarField::one();
+        for _ in 0..n1.max(n2) {
+            powers_of_tau.push(power);
+            power *= tau;
+        }
+
+        Ok(w3f_pcs::pcs::kzg::urs::URS {
+            powers_in_g1: g1.batch_mul(&powers_of_tau[..n1]),
+            powers_in_g2: g2.batch_mul(&powers_of_tau[..n2]),
+        })
+    }
 }
 
 /// The highest polynomial degree the prover needs to commit to.
@@ -70,7 +174,11 @@ mod tests {
         let rng = &mut test_rng();
         let domain_size = 256;
 
-        let params = generate_for_domain::<_, Fr, TestKzg, TestDomain>(domain_size, rng);
+        let params = params_for_domain::<Fr, TestKzg, TestDomain, _>(
+            &mut InsecureSetup::new(rng),
+            domain_size,
+        )
+        .unwrap();
 
         assert!(params_fit::<TestKzg, Fr>(&params, domain_size));
     }
@@ -81,7 +189,9 @@ mod tests {
     fn test_generate_for_domain_rounds_up() {
         let rng = &mut test_rng();
 
-        let params = generate_for_domain::<_, Fr, TestKzg, TestDomain>(200, rng);
+        let params =
+            params_for_domain::<Fr, TestKzg, TestDomain, _>(&mut InsecureSetup::new(rng), 200)
+                .unwrap();
 
         // 200 is not a valid radix-2 size; the prover will get a domain of 256.
         assert!(params_fit::<TestKzg, Fr>(&params, 256));
@@ -92,7 +202,11 @@ mod tests {
         let rng = &mut test_rng();
         let keyset_size = 100;
 
-        let params = generate_for_keyset::<_, Fr, TestKzg, TestDomain>(keyset_size, rng);
+        let params = params_for_keyset::<Fr, TestKzg, TestDomain, _>(
+            &mut InsecureSetup::new(rng),
+            keyset_size,
+        )
+        .unwrap();
 
         // keyset_size + 1 (for the accumulator), rounded up to a power of two.
         let required_domain_size = (keyset_size + 1).next_power_of_two();

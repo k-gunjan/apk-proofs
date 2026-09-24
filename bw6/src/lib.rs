@@ -48,6 +48,9 @@ mod piop;
 mod bitmask;
 mod keyset;
 pub mod setup;
+/// Test fixtures, including insecure SRS generation. Compiled only for this crate's own tests
+/// and under the `test-utils` feature, never into a production build.
+#[cfg(any(test, feature = "test-utils"))]
 pub mod test_helpers;
 
 /// Trait to extract the underlying curve point from a type e.g. commitment and get it back.

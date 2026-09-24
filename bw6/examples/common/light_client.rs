@@ -52,11 +52,6 @@ use apk_proofs::config::{
 };
 use apk_proofs::{hash_to_curve, Bitmask, CommitmentExt};
 
-// The `where` clause on each item below is the same four lines every time: the config, the two
-// arithmetic facts the protocol relies on (the outer scalar field is the inner base field, and
-// it supports FFTs), and cloneable PCS parameters. It is repeated rather than aliased because
-// trait aliases are not stable.
-
 type Inner<C> = <C as ApkConfig>::InnerPairing;
 type G2Of<C> = <Inner<C> as Pairing>::G2;
 
@@ -113,6 +108,7 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    apk_proofs::setup::InsecureSetup: apk_proofs::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     KeysetCommitmentOf<C>: 'static,
 {
     fn new<R: Rng>(rng: &mut R) -> Self {
@@ -157,6 +153,7 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    apk_proofs::setup::InsecureSetup: apk_proofs::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     KeysetCommitmentOf<C>: 'static,
 {
     fn new<R: Rng>(size: usize, quorum: usize, rng: &mut R) -> Self {
@@ -227,6 +224,7 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    apk_proofs::setup::InsecureSetup: apk_proofs::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     KeysetCommitmentOf<C>: 'static,
 {
     fn init(
@@ -296,6 +294,7 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    apk_proofs::setup::InsecureSetup: apk_proofs::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     KeysetCommitmentOf<C>: 'static,
 {
     fn new(
@@ -381,6 +380,7 @@ where
     <C::Pcs as PCS<ScalarOf<C>>>::C:
         CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
     PcsParamsOf<C>: Clone,
+    apk_proofs::setup::InsecureSetup: apk_proofs::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
     KeysetCommitmentOf<C>: 'static,
 {
     let domain_size = Apk::<C>::domain_size(validator_set_size)
@@ -400,7 +400,12 @@ where
         "Generating PCS params to support {} signers",
         validator_set_size
     ));
-    let params = Apk::<C>::setup(validator_set_size, rng);
+    // Insecure source (trapdoor sampled locally): tests only.
+    let params = Apk::<C>::setup(
+        &mut apk_proofs::setup::InsecureSetup::new(rng),
+        validator_set_size,
+    )
+    .unwrap();
     end_timer!(t_setup);
 
     let quorum = ((validator_set_size * 2) / 3) + 1;

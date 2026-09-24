@@ -53,6 +53,7 @@ dependencies = [
 name = "apk-proofs"
 version = "0.1.0"
 dependencies = [
+ "apk-proofs",
  "ark-bls12-377",
  "ark-bls12-381 0.6.0",
  "ark-bw6-761",
