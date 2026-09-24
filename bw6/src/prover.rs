@@ -337,4 +337,128 @@ mod tests {
         check_rejects_bad_bitmasks::<Bls12_377Config>();
         check_rejects_bad_bitmasks::<Bls12_381Config>();
     }
+
+    /// A bitmask off the wire can have padding bits set. They must not count as signers:
+    /// `count_ones` sees them, the emptiness check must not.
+    #[test]
+    fn padding_bits_are_not_signers() {
+        use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
+        type C = Bls12_381Config;
+
+        let rng = &mut test_rng();
+        let n = 10;
+        let params = Apk::<C>::setup(&mut InsecureSetup::new(rng), n).unwrap();
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, random_pks(n, rng)).unwrap();
+
+        // Layout: limb count (u64), the one limb (u64), padding size (u64), all little-endian.
+        // Bits 10..64 of the limb are padding; set the top one.
+        let mut bytes = Vec::new();
+        Bitmask::from_bits(&vec![false; n])
+            .serialize_compressed(&mut bytes)
+            .unwrap();
+        bytes[15] |= 0x80;
+        let bitmask = Bitmask::deserialize_compressed(&bytes[..]).unwrap();
+        assert_eq!(bitmask.size(), n);
+        assert_eq!(bitmask.count_ones(), 1, "the padding bit is set");
+
+        assert_eq!(
+            Apk::<C>::prove(&params, keyset, &commitment, bitmask).err(),
+            Some(ApkError::NoSigners)
+        );
+    }
+
+    #[test]
+    fn facade_reports_invalid_keys() {
+        use crate::{AccumulatorSeed, PublicKeyFault};
+        type C = Bls12_381Config;
+
+        let rng = &mut test_rng();
+        let params = Apk::<C>::setup(&mut InsecureSetup::new(rng), 10).unwrap();
+        let mut pks = random_pks::<_, <C as ApkConfig>::InnerCurve>(10, rng);
+        pks[7] = <C as ApkConfig>::InnerCurve::accumulator_seed().into();
+        assert_eq!(
+            Apk::<C>::commit_keyset(&params, pks).err(),
+            Some(ApkError::InvalidPublicKey {
+                index: 7,
+                fault: PublicKeyFault::NotInSubgroup
+            })
+        );
+    }
+
+    /// `packed` exists only on APK-377, so it gets its own check.
+    #[test]
+    fn packed_rejects_bad_bitmasks() {
+        type C = Bls12_377Config;
+        let rng = &mut test_rng();
+        let n = 10;
+        let params = Apk::<C>::setup(&mut InsecureSetup::new(rng), n).unwrap();
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, random_pks(n, rng)).unwrap();
+
+        assert_eq!(
+            Apk::<C>::prove_packed(
+                &params,
+                keyset.clone(),
+                &commitment,
+                Bitmask::from_bits(&[true])
+            )
+            .err(),
+            Some(ApkError::BitmaskLengthMismatch {
+                bitmask: 1,
+                keyset: n
+            })
+        );
+        assert_eq!(
+            Apk::<C>::prove_packed(
+                &params,
+                keyset,
+                &commitment,
+                Bitmask::from_bits(&vec![false; n])
+            )
+            .err(),
+            Some(ApkError::NoSigners)
+        );
+    }
+
+    /// The pattern a helper runs in a loop: one prover per validator set, reused across
+    /// blocks. A rejected bitmask must leave it usable for the next one.
+    fn check_prover_survives_errors<C>()
+    where
+        C: ApkConfig,
+        ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
+        <C::Pcs as PCS<ScalarOf<C>>>::C:
+            CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+        PcsParamsOf<C>: Clone,
+        InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
+    {
+        use crate::{ProverOf, VerifierOf};
+        use w3f_pcs::pcs::PcsParams;
+
+        let rng = &mut test_rng();
+        let n = 10;
+        let params = Apk::<C>::setup(&mut InsecureSetup::new(rng), n).unwrap();
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, random_pks(n, rng)).unwrap();
+        let prover =
+            ProverOf::<C>::new(keyset, &commitment, params.clone(), C::transcript()).unwrap();
+        let verifier =
+            VerifierOf::<C>::try_new(params.raw_vk(), commitment, C::transcript()).unwrap();
+
+        assert!(prover
+            .prove_simple(Bitmask::from_bits(&vec![false; n]))
+            .is_err());
+        assert!(prover
+            .prove_simple(Bitmask::from_bits(&vec![true; n + 1]))
+            .is_err());
+
+        let mut bits = vec![false; n];
+        bits[2] = true;
+        bits[9] = true;
+        let (proof, public_input) = prover.prove_simple(Bitmask::from_bits(&bits)).unwrap();
+        assert!(verifier.verify_simple(&public_input, &proof));
+    }
+
+    #[test]
+    fn prover_survives_errors() {
+        check_prover_survives_errors::<Bls12_377Config>();
+        check_prover_survives_errors::<Bls12_381Config>();
+    }
 }
