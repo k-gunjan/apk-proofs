@@ -19,6 +19,7 @@ pub struct PackedRegisterBuilder<F: PrimeField, D: DomainSet<F>> {
     register_evaluations: Option<SuccinctAccountableRegisterEvaluations<F>>,
 }
 
+#[allow(clippy::expect_used, reason = "see ROUNDS_IN_ORDER")]
 impl<IC, OC, S, D> ProverProtocol<IC, OC, S, D> for PackedRegisterBuilder<OC::ScalarField, D>
 where
     IC: AccumulatorSeed,
@@ -77,7 +78,7 @@ where
             .to_vec();
         let bitmask_packing_polys = self
             .bitmask_packing_registers
-            .unwrap()
+            .expect(crate::piop::ROUNDS_IN_ORDER)
             .get_register_polynomials()
             .to_vec();
         let mut polys = vec![];
@@ -93,7 +94,7 @@ where
         let bitmask_packing_constraints = self
             .bitmask_packing_registers
             .as_ref()
-            .unwrap()
+            .expect(crate::piop::ROUNDS_IN_ORDER)
             .compute_constraint_polynomials();
         let mut constraints = vec![];
         constraints.extend(affine_addition_constraints);
@@ -111,7 +112,7 @@ where
         let bitmask_packing_evals = self
             .bitmask_packing_registers
             .as_ref()
-            .unwrap()
+            .expect(crate::piop::ROUNDS_IN_ORDER)
             .evaluate_register_polynomials(point);
         let evals = SuccinctAccountableRegisterEvaluations {
             c: bitmask_packing_evals.0,
@@ -127,7 +128,10 @@ where
         phi: OC::ScalarField,
         zeta: OC::ScalarField,
     ) -> DensePolynomial<OC::ScalarField> {
-        let evals = self.register_evaluations.as_ref().unwrap();
+        let evals = self
+            .register_evaluations
+            .as_ref()
+            .expect(crate::piop::ROUNDS_IN_ORDER);
 
         let affine_addition_parts = self
             .affine_addition_registers
@@ -135,7 +139,7 @@ where
         let bitmask_packing_parts = self
             .bitmask_packing_registers
             .as_ref()
-            .unwrap()
+            .expect(crate::piop::ROUNDS_IN_ORDER)
             .compute_constraints_linearized();
 
         let mut parts = vec![];

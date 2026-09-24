@@ -29,7 +29,9 @@ impl<F: PrimeField> Radix2Domain<F> {
             .ok_or(too_large)
     }
 
-    /// Panicking shorthand for [`try_new`](Self::try_new), for sizes already known reachable.
+    /// Panicking shorthand for [`try_new`](Self::try_new), for tests and benchmarks.
+    #[cfg(any(test, feature = "test-utils"))]
+    #[allow(clippy::expect_used, reason = "test-only shorthand")]
     pub fn new(size: usize) -> Self {
         Self::try_new(size).expect("insufficient two-adicity for a radix-2 domain of this size")
     }

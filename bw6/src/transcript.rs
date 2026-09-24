@@ -89,7 +89,10 @@ impl<F: PrimeField> ApkTranscript<F> for Transcript {
     fn _get_128_bit_challenge(&mut self, label: &'static [u8]) -> F {
         let mut buf = [0u8; 16];
         self.challenge_bytes(label, &mut buf);
-        F::from_random_bytes(&buf).unwrap()
+        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
+        let challenge = F::from_random_bytes(&buf)
+            .expect("invariant: 128 random bits always fit below a modulus this large");
+        challenge
     }
 
     fn _get_128_bit_challenges(&mut self, label: &'static [u8], n: usize) -> Vec<F> {
@@ -100,7 +103,10 @@ impl<F: PrimeField> ApkTranscript<F> for Transcript {
 
     fn _append_serializable(&mut self, label: &'static [u8], message: &impl CanonicalSerialize) {
         let mut buf = vec![0; message.compressed_size()];
-        message.serialize_compressed(&mut buf).unwrap();
+        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
+        message
+            .serialize_compressed(&mut buf)
+            .expect("invariant: the buffer is exactly `compressed_size` bytes");
         self.append_message(label, &buf);
     }
 }

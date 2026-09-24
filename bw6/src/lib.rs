@@ -1,4 +1,19 @@
 //! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
+// This crate runs inside long-lived services that must survive bad input, so a panic outside
+// tests has to be either an error returned instead or an invariant argued at the site, under an
+// `#[allow(..., reason = ...)]` that says why it cannot fire. `assert!` is not covered by any
+// lint and is audited by hand.
+#![cfg_attr(
+    not(test),
+    warn(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::unimplemented,
+        clippy::todo,
+        clippy::unreachable
+    )
+)]
 use ark_ec::short_weierstrass::{Affine, SWCurveConfig};
 use ark_ec::{AffineRepr, CurveGroup};
 use ark_ff::{FftField, Field, PrimeField};
@@ -53,6 +68,12 @@ pub mod setup;
 /// Test fixtures, including insecure SRS generation. Compiled only for this crate's own tests
 /// and under the `test-utils` feature, never into a production build.
 #[cfg(any(test, feature = "test-utils"))]
+#[allow(
+    clippy::unwrap_used,
+    clippy::expect_used,
+    clippy::panic,
+    reason = "test fixtures: a panic is a test failure"
+)]
 pub mod test_helpers;
 
 /// Trait to extract the underlying curve point from a type e.g. commitment and get it back.

@@ -110,6 +110,7 @@ where
         let mut pks_x = Vec::with_capacity(affine_pks.len());
         let mut pks_y = Vec::with_capacity(affine_pks.len());
         for affine_point in &affine_pks {
+            #[allow(clippy::expect_used, reason = "invariant argued in the message")]
             let (x, y) = affine_point
                 .xy()
                 .expect("invariant: real keys were checked above, padding is a random G1 element");

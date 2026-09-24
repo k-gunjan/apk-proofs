@@ -45,6 +45,11 @@ impl<G: AffineRepr> RegisterPolynomials<G> for () {
     }
 }
 
+/// For the state a [`ProverProtocol`] fills in one round and reads in a later one.
+/// `Prover::prove` is the only driver and calls the rounds in order.
+pub(crate) const ROUNDS_IN_ORDER: &str =
+    "invariant: Prover::prove runs the protocol rounds in order";
+
 // PIOP stays for Polynomial Interactive Oracle Proof.
 // It's a type of information-theoretical interactive proof systems where to convince the verifier that
 // a relation holds, the prover sends bounded-degree polynomials, that are accessible by the verifier

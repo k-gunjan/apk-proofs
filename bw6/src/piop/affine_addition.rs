@@ -231,6 +231,7 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         let apk_acc: Vec<_> = iter::once(h).chain(apk_acc).collect();
         let mut apk_acc = IC::normalize_batch(&apk_acc);
 
+        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
         let last = *apk_acc
             .last()
             .expect("invariant: the accumulator starts with the seed, so is never empty");
@@ -240,6 +241,7 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         // Every accumulator value is `h + S` with `S` in G1 (`Keyset::new` rejects keys outside
         // it) and `h` outside G1, so none is the identity and all have affine coordinates.
         apk_acc.iter().for_each(|p| {
+            #[allow(clippy::expect_used, reason = "invariant argued in the comment above")]
             let (x, y) = p
                 .xy()
                 .expect("invariant: h + S is never the identity for S in G1");
@@ -265,6 +267,7 @@ impl<F: PrimeField, D: DomainSet<F>> AffineAdditionRegisters<F, D> {
         Self::new_unchecked(domains, bitmask, keyset, [apk_acc_x, apk_acc_y])
     }
 
+    #[allow(clippy::expect_used, reason = "invariant argued in the message")]
     fn new_unchecked<IC, OC>(
         domains: Domains<F, D>,
         bitmask: Vec<F>,
@@ -533,10 +536,11 @@ where
     ) -> (OC::ScalarField, OC::ScalarField) {
         let h = IC::accumulator_seed();
         let apk_plus_h = (h + apk).into_affine();
+        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
         let (h_x, h_y): (OC::ScalarField, OC::ScalarField) = h
             .xy()
             .map(|(x, y)| ((x).into(), (y).into()))
-            .expect("invalid point");
+            .expect("invariant: the accumulator seed is a fixed point off the identity");
         let (apk_plus_h_x, apk_plus_h_y): (OC::ScalarField, OC::ScalarField) = apk_plus_h
             .xy()
             .map(|(x, y)| ((x).into(), (y).into()))

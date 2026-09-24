@@ -97,10 +97,16 @@ impl<F: PrimeField> SuccinctAccountableRegisterEvaluations<F> {
         assert_eq!(domain_size % bits_in_bitmask_chunk, 0);
         let chunks_in_bitmask = domain_size / bits_in_bitmask_chunk; // TODO: bitmask should be right-padded with 0s to domain_size
 
-        let bits_in_bitmask_chunk_inv = F::from(256u16).inverse().unwrap();
+        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
+        let bits_in_bitmask_chunk_inv = F::from(256u16)
+            .inverse()
+            .expect("invariant: 256 is nonzero in any field of odd characteristic");
 
         let powers_of_r = utils::powers(r, (chunks_in_bitmask - 1) as usize);
-        let r_pow_m = r * powers_of_r.last().unwrap();
+        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
+        let r_pow_m = r * powers_of_r
+            .last()
+            .expect("invariant: `powers` always returns at least r^0");
         let mut bitmask_chunks = bitmask.to_chunks_as_field_elements::<F>(limbs_in_chunk as usize);
         //TODO: pad in Bitmask
         bitmask_chunks.resize_with(chunks_in_bitmask as usize, || F::zero());
@@ -348,7 +354,9 @@ impl<F: PrimeField, D: DomainSet<F>> BitmaskPackingRegisters<F, D> {
             .map(|(a, b)| *a * b)
             .take(domain_size - 1)
             .for_each(|x| {
-                acc.push(x + acc.last().unwrap());
+                #[allow(clippy::expect_used, reason = "invariant argued in the message")]
+                let prev = *acc.last().expect("invariant: acc starts with one element");
+                acc.push(x + prev);
             });
         acc
     }

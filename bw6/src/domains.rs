@@ -87,8 +87,10 @@ pub struct Domains<F: PrimeField, D: DomainSet<F>> {
 impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
     /// Builds the domains for a trace of at least `min_domain_size` rows.
     ///
-    /// Panics if the field has no domain that large; `DomainSet::for_min_size` is the fallible
-    /// form, and anything derived from untrusted input should go through it.
+    /// Panics if the field has no domain that large, so it is compiled only for tests and
+    /// benchmarks; production code goes through `DomainSet::for_min_size` and [`Self::from_set`].
+    #[cfg(any(test, feature = "test-utils"))]
+    #[allow(clippy::expect_used, reason = "test-only shorthand")]
     pub fn new(min_domain_size: usize) -> Self {
         Self::from_set(
             D::for_min_size(min_domain_size).expect("no evaluation domain of the requested size"),

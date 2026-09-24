@@ -99,7 +99,11 @@ where
         phi: OC::ScalarField,
         zeta: OC::ScalarField,
     ) -> DensePolynomial<OC::ScalarField> {
-        let evals = self.register_evaluations.as_ref().unwrap();
+        #[allow(clippy::expect_used, reason = "see ROUNDS_IN_ORDER")]
+        let evals = self
+            .register_evaluations
+            .as_ref()
+            .expect(crate::piop::ROUNDS_IN_ORDER);
         let parts = self.registers.compute_constraints_linearized(evals, zeta);
         utils::randomize(phi, &parts)
     }
