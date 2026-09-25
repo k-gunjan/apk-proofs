@@ -55,6 +55,8 @@ pub enum ApkError {
     /// A keyset commitment whose sizes cannot go together: it must hold at least one key, and
     /// fewer keys than the domain has rows, the last row being reserved.
     InvalidKeysetCommitment { keyset_size: u64, domain_size: u64 },
+    /// A keyset commitment whose points are not in the outer curve's G1, or not on it.
+    KeysetCommitmentNotInG1,
     /// A counting public input claiming no signers, or more than the keyset holds.
     CountOutOfRange { count: usize, keyset_size: usize },
     /// A public input the verifier cannot evaluate; the payload says which part.
@@ -100,6 +102,9 @@ impl core::fmt::Display for ApkError {
                  and fewer keys than the domain size",
                 keyset_size, domain_size
             ),
+            ApkError::KeysetCommitmentNotInG1 => {
+                write!(f, "keyset commitment is not in the outer curve's G1")
+            }
             ApkError::CountOutOfRange { count, keyset_size } => write!(
                 f,
                 "public input claims {} signers; must be between 1 and the keyset size {}",

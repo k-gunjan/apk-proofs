@@ -107,7 +107,18 @@ pub trait PublicInput<C: CurveGroup>: CanonicalSerialize + CanonicalDeserialize 
     fn new(apk: &C::Affine, bitmask: &Bitmask) -> Self;
 }
 
-// Used in 'basic' and 'packed' schemes
+/// Public input of the 'basic' and 'packed' schemes.
+///
+/// The verifier does not check that `apk` is in G1, or even on the curve: a proof that verifies
+/// implies both. It only rejects the identity and `-h`, which it cannot evaluate. The last-row constraint fixes the accumulator's final value `h + S`, where `S` is the sum
+/// of the selected keys, to equal `h + apk` as the verifier computes it, and the chord through
+/// `h` and a given result meets the curve's formulas at one `apk` only — `S` — whether or not
+/// the `apk` supplied was on the curve. `S` is in G1 when every key behind the keyset
+/// commitment is, which [`Keyset::new`] enforces on the committing side and the verifier takes
+/// on trust from whoever signed the commitment.
+///
+/// So the subgroup check `deserialize_compressed` runs on `apk` is redundant for verification;
+/// `deserialize_compressed_unchecked` is enough.
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct AccountablePublicInput<C: CurveGroup> {
     pub apk: C::Affine,
@@ -123,7 +134,8 @@ impl<C: CurveGroup> PublicInput<C> for AccountablePublicInput<C> {
     }
 }
 
-// Used in 'counting' scheme
+/// Public input of the 'counting' scheme. What [`AccountablePublicInput`] says about `apk`
+/// holds here too.
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingPublicInput<C: CurveGroup> {
     pub apk: C::Affine,
@@ -237,6 +249,12 @@ pub trait AccumulatorSeed: PrimeSubgroup {
 }
 
 /// Curves that can test membership in their prime-order subgroup.
+///
+/// Implemented per curve rather than for every short Weierstrass curve at once, so that a curve
+/// with a cheaper test than multiplication by the group order can use it: BW6-761 uses the
+/// endomorphism test in [`crate::endo`]. BW6-767 multiplies by the group order for now, as its
+/// authors' implementation does. Both the inner and the outer curve of every
+/// [`ApkConfig`] implement it; see `crate::instances`.
 pub trait PrimeSubgroup: CurveGroup {
     /// Whether `p` is on the curve and in the prime-order subgroup.
     ///
@@ -245,12 +263,25 @@ pub trait PrimeSubgroup: CurveGroup {
     fn is_in_prime_subgroup(p: &Self::Affine) -> bool;
 }
 
-/// Delegates to the curve's `is_in_correct_subgroup_assuming_on_curve`, which is
-/// endomorphism-based where arkworks provides one (BLS12-381 G1) and double-and-add by `r`
-/// otherwise (BLS12-377 G1).
-impl<P: SWCurveConfig> PrimeSubgroup for ark_ec::short_weierstrass::Projective<P> {
-    fn is_in_prime_subgroup(p: &Affine<P>) -> bool {
-        p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve()
+/// The default [`PrimeSubgroup::is_in_prime_subgroup`]: arkworks'
+/// `is_in_correct_subgroup_assuming_on_curve`, which is endomorphism-based where arkworks
+/// provides one (BLS12-381 G1) and double-and-add by the group order otherwise.
+pub fn generic_subgroup_check<P: SWCurveConfig>(p: &Affine<P>) -> bool {
+    p.is_on_curve() && p.is_in_correct_subgroup_assuming_on_curve()
+}
+
+/// Opening proofs whose curve points the verifier can list, to check they lie in G1 before
+/// they reach the pairing.
+///
+/// Every [`ApkConfig::Pcs`] must implement this for its `Proof` type. A scheme whose opening
+/// proof is a single point, as KZG's is, is covered by the impl for affine points.
+pub trait OpeningProofPoints<G: AffineRepr> {
+    fn points(&self) -> Vec<G>;
+}
+
+impl<G: AffineRepr> OpeningProofPoints<G> for G {
+    fn points(&self) -> Vec<G> {
+        vec![*self]
     }
 }
 

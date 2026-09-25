@@ -56,7 +56,7 @@ impl<E: Pairing> SecretKey<E> {
     /// # Note
     ///
     /// In practice, the message should be hashed to a G2 point using a
-    /// hash-to-curve functio.
+    /// hash-to-curve function.
     ///
     /// # Example
     ///

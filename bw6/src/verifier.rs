@@ -15,7 +15,8 @@ use crate::transcript::ApkTranscript;
 use crate::utils::LagrangeEvaluations;
 use crate::{
     utils, AccountablePublicInput, AccumulatorSeed, ApkError, CommitmentExt, CountingProof,
-    CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
+    CountingPublicInput, KeysetCommitment, OpeningProofPoints, PackedProof, PrimeSubgroup, Proof,
+    PublicInput, SimpleProof,
 };
 
 type Transcript = MerlinTranscript;
@@ -45,10 +46,11 @@ where
 impl<IC, OC, S, D> Verifier<IC, OC, S, D>
 where
     IC: AccumulatorSeed,
-    OC: CurveGroup,
+    OC: CurveGroup + PrimeSubgroup,
     OC::ScalarField: From<IC::BaseField> + FftField,
     S: PCS<OC::ScalarField>,
     S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
+    S::Proof: OpeningProofPoints<OC::Affine>,
     D: DomainSet<OC::ScalarField>,
 {
     /// The sizes come out of the keyset commitment, which for a bridge arrives from the chain.
@@ -72,6 +74,14 @@ where
         }
         let domain_size = pks_comm.domain_size as usize;
         let domain = D::base_for_exact_size(domain_size)?;
+        // The signers vouch for what the commitment says, but a malformed encoding is not
+        // something they signed off on; checking here keeps it off the pairing for good.
+        if ![&pks_comm.pks_comm.0, &pks_comm.pks_comm.1]
+            .iter()
+            .all(|c| OC::is_in_prime_subgroup(&c.to_affine()))
+        {
+            return Err(ApkError::KeysetCommitmentNotInG1);
+        }
 
         <Transcript as ApkTranscript<OC::ScalarField>>::set_protocol_params(
             &mut empty_transcript,
@@ -92,14 +102,18 @@ where
         })
     }
 
-    /// `Ok(false)` for a proof that does not verify; `Err` for a public input that is malformed
-    /// before any proof is looked at.
+    /// `Ok(false)` for a proof that does not verify, including one with a curve point outside
+    /// G1; `Err` for a public input that is malformed before any proof is looked at.
     pub fn verify_simple(
         &self,
         public_input: &AccountablePublicInput<IC>,
         proof: &SimpleProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
     ) -> Result<bool, ApkError> {
         self.check_bitmask_length(&public_input.bitmask)?;
+        Self::check_apk(&public_input.apk)?;
+        if !Self::proof_points_in_g1(proof) {
+            return Ok(false);
+        }
         let (challenges, mut fsrng) = self.restore_challenges(
             public_input,
             proof,
@@ -141,6 +155,10 @@ where
         proof: &PackedProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
     ) -> Result<bool, ApkError> {
         self.check_bitmask_length(&public_input.bitmask)?;
+        Self::check_apk(&public_input.apk)?;
+        if !Self::proof_points_in_g1(proof) {
+            return Ok(false);
+        }
         let (challenges, mut fsrng) = self.restore_challenges(
             public_input,
             proof,
@@ -188,6 +206,10 @@ where
                 keyset_size,
             });
         }
+        Self::check_apk(&public_input.apk)?;
+        if !Self::proof_points_in_g1(proof) {
+            return Ok(false);
+        }
         let (challenges, mut fsrng) = self.restore_challenges(
             public_input,
             proof,
@@ -228,6 +250,49 @@ where
             });
         }
         Ok(())
+    }
+
+    /// The identity as an aggregate key: with no signers selected, the accumulator never moves
+    /// off its seed, so a valid proof for `apk = 0` exists. BLS verification against the
+    /// identity key then accepts the identity signature on any message. A light client's quorum
+    /// check rules that out, but not every caller runs one.
+    ///
+    /// Nothing else about `apk` is checked here: a verifying proof implies it is in G1. See
+    /// [`AccountablePublicInput`].
+    fn check_apk(apk: &IC::Affine) -> Result<(), ApkError> {
+        use ark_ec::AffineRepr;
+        if apk.is_zero() {
+            return Err(ApkError::InvalidPublicInput("apk is the identity"));
+        }
+        Ok(())
+    }
+
+    /// Whether every curve point in `proof` is in the outer curve's G1: the register and
+    /// quotient commitments and the opening proofs.
+    ///
+    /// Points outside G1 must not reach the pairing, whose soundness argument holds on G1 only.
+    /// The old verifier checked the two points it fed the pairing, after batching the openings;
+    /// behind the [`PCS`] interface those are out of reach, so each point is checked instead.
+    /// That is also the stronger check: a check on a random combination only, with small
+    /// factors in the cofactor, can be passed by grinding the challenges until the components
+    /// outside G1 cancel.
+    fn proof_points_in_g1<E, C, AC>(
+        proof: &Proof<OC::ScalarField, E, C, AC, S::C, S::Proof>,
+    ) -> bool
+    where
+        E: RegisterEvaluations<OC::ScalarField>,
+        C: RegisterCommitments<OC::Affine>,
+        AC: RegisterCommitments<OC::Affine>,
+    {
+        let t_subgroup = start_timer!(|| "subgroup checks");
+        let mut points = proof.register_commitments.as_vec();
+        points.extend(proof.additional_commitments.as_vec());
+        points.push(proof.q_comm.to_affine());
+        points.extend(proof.w_at_zeta_proof.points());
+        points.extend(proof.r_at_zeta_omega_proof.points());
+        let in_g1 = points.iter().all(OC::is_in_prime_subgroup);
+        end_timer!(t_subgroup);
+        in_g1
     }
 
     fn validate_evaluations<E, C, AC, P>(
@@ -378,7 +443,7 @@ mod tests {
         Bls12_377Config, Bls12_381Config, CommitmentExt, CountingPublicInputOf, PcsParamsOf,
         ScalarOf, VerifierOf,
     };
-    use ark_ec::CurveGroup;
+    use ark_ec::{CurveGroup, PrimeGroup};
     use ark_std::test_rng;
     use w3f_pcs::pcs::{PcsParams, PCS};
 
@@ -479,5 +544,117 @@ mod tests {
     fn rejects_malformed_inputs() {
         check_rejects_malformed_inputs::<Bls12_377Config>();
         check_rejects_malformed_inputs::<Bls12_381Config>();
+    }
+
+    /// `bad_outer` is on the outer curve but outside G1; `off_curve_apk` is not on the inner
+    /// curve at all.
+    fn check_rejects_points_outside_g1<C>(
+        bad_outer: <C::OuterCurve as CurveGroup>::Affine,
+        off_curve_apk: <C::InnerCurve as CurveGroup>::Affine,
+    ) where
+        C: ApkConfig,
+        C::Pcs: PCS<ScalarOf<C>, Proof = <C::OuterCurve as CurveGroup>::Affine>,
+        ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
+        <C::Pcs as PCS<ScalarOf<C>>>::C:
+            CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+        PcsParamsOf<C>: Clone,
+        InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
+    {
+        use crate::PrimeSubgroup;
+        use ark_ec::AffineRepr;
+        type Comm<C> = <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C;
+
+        assert!(!C::OuterCurve::is_in_prime_subgroup(&bad_outer));
+        let rng = &mut test_rng();
+        let n = 10;
+        let params = Apk::<C>::setup(&mut InsecureSetup::new(rng), n).unwrap();
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, random_pks(n, rng)).unwrap();
+        let verify = |pi: &AccountablePublicInputOf<C>, proof: &_| {
+            Apk::<C>::verify(&params, commitment.clone(), pi, proof)
+        };
+
+        // A keyset commitment outside G1 is refused before any proof is looked at.
+        for i in 0..2 {
+            let mut comm = commitment.clone();
+            let bad = Comm::<C>::from_affine(bad_outer);
+            if i == 0 {
+                comm.pks_comm.0 = bad;
+            } else {
+                comm.pks_comm.1 = bad;
+            }
+            assert!(matches!(
+                VerifierOf::<C>::try_new(params.raw_vk(), comm, C::transcript()),
+                Err(ApkError::KeysetCommitmentNotInG1)
+            ));
+        }
+
+        // Every curve point of a proof, in turn, swapped for one outside G1.
+        let bits = Bitmask::from_bits(&[true, false].repeat(n / 2));
+        let (mut proof, public_input) =
+            Apk::<C>::prove(&params, keyset.clone(), &commitment, bits.clone()).unwrap();
+        assert_eq!(verify(&public_input, &proof), Ok(true));
+        macro_rules! swapped_out_fails {
+            ($field:expr, $bad:expr) => {{
+                let original = core::mem::replace(&mut $field, $bad);
+                assert_eq!(verify(&public_input, &proof), Ok(false));
+                $field = original;
+            }};
+        }
+        swapped_out_fails!(proof.register_commitments.0, bad_outer);
+        swapped_out_fails!(proof.register_commitments.1, bad_outer);
+        swapped_out_fails!(proof.q_comm, Comm::<C>::from_affine(bad_outer));
+        swapped_out_fails!(proof.w_at_zeta_proof, bad_outer);
+        swapped_out_fails!(proof.r_at_zeta_omega_proof, bad_outer);
+        assert_eq!(verify(&public_input, &proof), Ok(true));
+
+        // An apk off by a point outside G1, or not on the curve at all, is not checked for
+        // either, and needs not be: the proof does not verify for it.
+        let h = C::InnerCurve::accumulator_seed();
+        for apk in [(public_input.apk + h).into_affine(), off_curve_apk] {
+            let forged = AccountablePublicInputOf::<C> {
+                apk,
+                bitmask: bits.clone(),
+            };
+            assert_eq!(verify(&forged, &proof), Ok(false));
+        }
+
+        // The identity as apk: an empty signer set, which a valid proof exists for.
+        let empty = AccountablePublicInputOf::<C> {
+            apk: <C::InnerCurve as CurveGroup>::Affine::zero(),
+            bitmask: Bitmask::from_bits(&vec![false; n]),
+        };
+        assert_eq!(
+            verify(&empty, &proof),
+            Err(ApkError::InvalidPublicInput("apk is the identity"))
+        );
+        let (proof, public_input) =
+            Apk::<C>::prove_counting(&params, keyset, &commitment, bits).unwrap();
+        let forged = CountingPublicInputOf::<C> {
+            apk: <C::InnerCurve as CurveGroup>::Affine::zero(),
+            count: public_input.count,
+        };
+        assert_eq!(
+            Apk::<C>::verify_counting(&params, commitment, &forged, &proof),
+            Err(ApkError::InvalidPublicInput("apk is the identity"))
+        );
+    }
+
+    #[test]
+    fn rejects_points_outside_g1() {
+        use crate::test_helpers::point_of_order;
+        let rng = &mut test_rng();
+
+        let t = point_of_order::<ark_bw6_761::g1::Config, _>(2, rng);
+        check_rejects_points_outside_g1::<Bls12_377Config>(
+            (ark_bw6_761::G1Projective::generator() + t).into_affine(),
+            ark_bls12_377::G1Affine::new_unchecked(1u8.into(), 1u8.into()),
+        );
+
+        // The order-3 point (0, 1): what the naive BW6-767 check would have let through.
+        let t = ark_bw6_767::G1Affine::new_unchecked(0u8.into(), 1u8.into());
+        check_rejects_points_outside_g1::<Bls12_381Config>(
+            (ark_bw6_767::G1Projective::generator() + t).into_affine(),
+            ark_bls12_381::G1Affine::new_unchecked(1u8.into(), 1u8.into()),
+        );
     }
 }

@@ -55,10 +55,17 @@ pub trait ApkConfig: 'static + Sized {
 
     /// Where the proof is computed. Its scalar field is `InnerCurve`'s base field, which is what
     /// lets inner-curve coordinates be manipulated as native field elements.
-    type OuterCurve: CurveGroup;
+    ///
+    /// The verifier checks every curve point of a proof against [`crate::PrimeSubgroup`] before
+    /// it reaches the pairing, so the outer curve's test should be a fast one.
+    type OuterCurve: CurveGroup + crate::PrimeSubgroup;
 
-    /// Commitment scheme over the outer curve.
-    type Pcs: PCS<ScalarOf<Self>>;
+    /// Commitment scheme over the outer curve. Its opening proofs must list their curve points,
+    /// for the verifier to check them; see [`crate::OpeningProofPoints`].
+    type Pcs: PCS<
+        ScalarOf<Self>,
+        Proof: crate::OpeningProofPoints<<Self::OuterCurve as CurveGroup>::Affine>,
+    >;
 
     /// The `n, 2n, kn` triple of evaluation domains, and the shift that goes with them. This is
     /// the component that cannot be shared between configurations: see [`crate::domain`].

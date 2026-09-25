@@ -128,6 +128,23 @@ pub const OMEGA: Fq = MontFp!(
      639090213645505120388400344940985710520836292650"
 );
 
+/// BW6-761 G1 membership through the endomorphism, rather than arkworks' multiplication by `r`.
+/// See [`crate::endo::subgroup_check`].
+impl crate::PrimeSubgroup for ark_ec::short_weierstrass::Projective<ark_bw6_761::g1::Config> {
+    fn is_in_prime_subgroup(p: &BW6_761_G1Affine) -> bool {
+        use ark_ec::AffineRepr;
+        p.is_on_curve()
+            && crate::endo::subgroup_check::<ark_bw6_761::Config>(&p.into_group(), OMEGA, U)
+    }
+}
+
+/// arkworks' own check: double-and-add by `r`, BLS12-377 G1 having no faster one in arkworks.
+impl crate::PrimeSubgroup for ark_ec::short_weierstrass::Projective<ark_bls12_377::g1::Config> {
+    fn is_in_prime_subgroup(p: &ark_bls12_377::G1Affine) -> bool {
+        crate::generic_subgroup_check(p)
+    }
+}
+
 /// Seeds the affine-addition accumulator at `(0, 1)`: on the curve `y^2 = x^3 + 1`,
 /// of order 3, and so outside G1. See [`crate::AccumulatorSeed`].
 // Spelled as the concrete projective type rather than the `InnerCurve` alias: the alias goes
