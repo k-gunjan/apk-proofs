@@ -52,6 +52,16 @@ pub enum ApkError {
     /// The prover's witness does not satisfy the constraints, so the quotient polynomial does
     /// not exist. With a validated keyset and bitmask this indicates a bug.
     ConstraintsNotSatisfied,
+    /// A keyset commitment whose sizes cannot go together: it must hold at least one key, and
+    /// fewer keys than the domain has rows, the last row being reserved.
+    InvalidKeysetCommitment { keyset_size: u64, domain_size: u64 },
+    /// A counting public input claiming no signers, or more than the keyset holds.
+    CountOutOfRange { count: usize, keyset_size: usize },
+    /// A public input the verifier cannot evaluate; the payload says which part.
+    InvalidPublicInput(&'static str),
+    /// The configuration's accumulator seed has no affine form. It is a constant of the inner
+    /// curve, so this is a misconfigured curve, not bad input.
+    InvalidAccumulatorSeed,
 }
 
 impl core::fmt::Display for ApkError {
@@ -80,6 +90,24 @@ impl core::fmt::Display for ApkError {
             ApkError::Pcs(step) => write!(f, "commitment scheme failed: {}", step),
             ApkError::ConstraintsNotSatisfied => {
                 write!(f, "witness does not satisfy the constraints")
+            }
+            ApkError::InvalidKeysetCommitment {
+                keyset_size,
+                domain_size,
+            } => write!(
+                f,
+                "keyset commitment claims {} keys over a domain of {}; needs at least one key \
+                 and fewer keys than the domain size",
+                keyset_size, domain_size
+            ),
+            ApkError::CountOutOfRange { count, keyset_size } => write!(
+                f,
+                "public input claims {} signers; must be between 1 and the keyset size {}",
+                count, keyset_size
+            ),
+            ApkError::InvalidPublicInput(what) => write!(f, "invalid public input: {}", what),
+            ApkError::InvalidAccumulatorSeed => {
+                write!(f, "the accumulator seed is the point at infinity")
             }
         }
     }

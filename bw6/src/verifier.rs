@@ -5,7 +5,7 @@ use merlin::{Transcript as MerlinTranscript, TranscriptRng};
 use w3f_pcs::aggregation::single::aggregate_claims_multiexp;
 use w3f_pcs::pcs::{PcsParams, RawVerifierKey, PCS};
 
-use crate::domain::{DomainError, DomainSet, FftDomain};
+use crate::domain::{DomainSet, FftDomain};
 use crate::fsrng::fiat_shamir_rng;
 use crate::piop::affine_addition::AffineAdditionEvaluations;
 use crate::piop::bitmask_packing::SuccinctAccountableRegisterEvaluations;
@@ -14,7 +14,7 @@ use crate::piop::{RegisterCommitments, RegisterEvaluations, VerifierProtocol};
 use crate::transcript::ApkTranscript;
 use crate::utils::LagrangeEvaluations;
 use crate::{
-    utils, AccountablePublicInput, AccumulatorSeed, CommitmentExt, CountingProof,
+    utils, AccountablePublicInput, AccumulatorSeed, ApkError, CommitmentExt, CountingProof,
     CountingPublicInput, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
 };
 
@@ -51,25 +51,25 @@ where
     S::C: CommitmentExt<OC::ScalarField, Affine = OC::Affine> + Clone,
     D: DomainSet<OC::ScalarField>,
 {
-    pub fn new(
-        verifier_key: <S::Params as PcsParams>::RVK,
-        pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
-        empty_transcript: Transcript,
-    ) -> Self {
-        Self::try_new(verifier_key, pks_comm, empty_transcript)
-            .expect("keyset commitment names an unusable domain")
-    }
-
-    /// Fallible constructor.
+    /// The sizes come out of the keyset commitment, which for a bridge arrives from the chain.
+    /// The commitment is signed by the validators, so the sizes are trusted to be what they
+    /// signed — but not to be usable: the domain size may name one this field cannot realise,
+    /// or the key count may not fit it. Both are rejected rather than panicking.
     ///
-    /// The domain size comes out of the keyset commitment, which for a bridge arrives from the
-    /// chain, so it is untrusted: it may name a size this field cannot realise, or one no field
-    /// could. Both are rejected rather than panicking.
+    /// Everything checked here is checked once per keyset rather than once per proof.
     pub fn try_new(
         verifier_key: <S::Params as PcsParams>::RVK,
         pks_comm: KeysetCommitment<OC::ScalarField, S::C>,
         mut empty_transcript: Transcript,
-    ) -> Result<Self, DomainError> {
+    ) -> Result<Self, ApkError> {
+        // At least one key, and every key on a row below the last, which is reserved. The
+        // cheap check goes first: building the domain is not free.
+        if pks_comm.keyset_size == 0 || pks_comm.keyset_size >= pks_comm.domain_size {
+            return Err(ApkError::InvalidKeysetCommitment {
+                keyset_size: pks_comm.keyset_size,
+                domain_size: pks_comm.domain_size,
+            });
+        }
         let domain_size = pks_comm.domain_size as usize;
         let domain = D::base_for_exact_size(domain_size)?;
 
@@ -92,11 +92,14 @@ where
         })
     }
 
+    /// `Ok(false)` for a proof that does not verify; `Err` for a public input that is malformed
+    /// before any proof is looked at.
     pub fn verify_simple(
         &self,
         public_input: &AccountablePublicInput<IC>,
         proof: &SimpleProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
-    ) -> bool {
+    ) -> Result<bool, ApkError> {
+        self.check_bitmask_length(&public_input.bitmask)?;
         let (challenges, mut fsrng) = self.restore_challenges(
             public_input,
             proof,
@@ -125,17 +128,19 @@ where
 
         let apk = public_input.apk;
         let constraint_polynomial_evals = evaluations_with_bitmask
-            .evaluate_constraint_polynomials::<IC, OC>(&apk, &evals_at_zeta);
+            .evaluate_constraint_polynomials::<IC, OC>(&apk, &evals_at_zeta)?;
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
-        openings_valid
-            && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial)
+        Ok(openings_valid
+            && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial))
     }
 
+    /// See [`Self::verify_simple`].
     pub fn verify_packed(
         &self,
         public_input: &AccountablePublicInput<IC>,
         proof: &PackedProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
-    ) -> bool {
+    ) -> Result<bool, ApkError> {
+        self.check_bitmask_length(&public_input.bitmask)?;
         let (challenges, mut fsrng) = self.restore_challenges(
             public_input,
             proof,
@@ -164,18 +169,25 @@ where
                 challenges.r,
                 &public_input.bitmask,
                 self.domain.size() as u64,
-            );
+            )?;
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
-        openings_valid
-            && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial)
+        Ok(openings_valid
+            && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial))
     }
 
+    /// See [`Self::verify_simple`].
     pub fn verify_counting(
         &self,
         public_input: &CountingPublicInput<IC>,
         proof: &CountingProof<OC::ScalarField, OC::Affine, S::C, S::Proof>,
-    ) -> bool {
-        assert!(public_input.count > 0, "Count must be positive");
+    ) -> Result<bool, ApkError> {
+        let keyset_size = self.keyset_size();
+        if public_input.count == 0 || public_input.count > keyset_size {
+            return Err(ApkError::CountOutOfRange {
+                count: public_input.count,
+                keyset_size,
+            });
+        }
         let (challenges, mut fsrng) = self.restore_challenges(
             public_input,
             proof,
@@ -195,10 +207,27 @@ where
         let apk = public_input.apk;
         let constraint_polynomial_evals = proof
             .register_evaluations
-            .evaluate_constraint_polynomials::<IC, OC>(apk, count, &evals_at_zeta);
+            .evaluate_constraint_polynomials::<IC, OC>(apk, count, &evals_at_zeta)?;
         let w = utils::horner_field(&constraint_polynomial_evals, challenges.phi);
-        openings_valid
-            && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial)
+        Ok(openings_valid
+            && (proof.r_zeta_omega + w == proof.q_zeta * evals_at_zeta.vanishing_polynomial))
+    }
+
+    fn keyset_size(&self) -> usize {
+        self.pks_comm.keyset_size as usize
+    }
+
+    /// One bit per key, exactly. The verifier folds the bitmask into a polynomial over the
+    /// domain, so extra bits would not be ignored: they would land on padding rows, or wrap
+    /// around onto real keys and report signers under the wrong index.
+    fn check_bitmask_length(&self, bitmask: &crate::Bitmask) -> Result<(), ApkError> {
+        if bitmask.size() != self.keyset_size() {
+            return Err(ApkError::BitmaskLengthMismatch {
+                bitmask: bitmask.size(),
+                keyset: self.keyset_size(),
+            });
+        }
+        Ok(())
     }
 
     fn validate_evaluations<E, C, AC, P>(
@@ -242,8 +271,9 @@ where
         let mut register_evals = proof.register_evaluations.as_vec();
         register_evals.push(proof.q_zeta);
 
-        assert_eq!(commitment_points.len(), challenges.nus.len());
-        assert_eq!(register_evals.len(), challenges.nus.len());
+        // Both lengths are fixed by the proof type, and `nus` was drawn for exactly that many.
+        debug_assert_eq!(commitment_points.len(), challenges.nus.len());
+        debug_assert_eq!(register_evals.len(), challenges.nus.len());
 
         let (w_comm_affine, w_at_zeta) =
             aggregate_claims_multiexp(commitment_points, register_evals, &challenges.nus);
@@ -336,5 +366,118 @@ where
             Challenges { r, phi, zeta, nus },
             fiat_shamir_rng(&mut transcript),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::setup::InsecureSetup;
+    use crate::test_helpers::random_pks;
+    use crate::{
+        AccountablePublicInputOf, AccumulatorSeed, Apk, ApkConfig, ApkError, Bitmask,
+        Bls12_377Config, Bls12_381Config, CommitmentExt, CountingPublicInputOf, PcsParamsOf,
+        ScalarOf, VerifierOf,
+    };
+    use ark_ec::CurveGroup;
+    use ark_std::test_rng;
+    use w3f_pcs::pcs::{PcsParams, PCS};
+
+    fn check_rejects_malformed_inputs<C>()
+    where
+        C: ApkConfig,
+        ScalarOf<C>: From<<C::InnerCurve as CurveGroup>::BaseField> + ark_ff::FftField,
+        <C::Pcs as PCS<ScalarOf<C>>>::C:
+            CommitmentExt<ScalarOf<C>, Affine = <C::OuterCurve as CurveGroup>::Affine> + Clone,
+        PcsParamsOf<C>: Clone,
+        InsecureSetup: crate::setup::PcsSetup<ScalarOf<C>, C::Pcs>,
+    {
+        let rng = &mut test_rng();
+        let n = 10;
+        let params = Apk::<C>::setup(&mut InsecureSetup::new(rng), n).unwrap();
+        let (keyset, commitment) = Apk::<C>::commit_keyset(&params, random_pks(n, rng)).unwrap();
+        let domain_size = commitment.domain_size as usize;
+        assert_eq!(commitment.keyset_size, n as u64);
+
+        // The commitment: at least one key, and fewer keys than the domain has rows.
+        for bad in [0, commitment.domain_size, commitment.domain_size + 1] {
+            let mut comm = commitment.clone();
+            comm.keyset_size = bad;
+            assert!(matches!(
+                VerifierOf::<C>::try_new(params.raw_vk(), comm, C::transcript()),
+                Err(ApkError::InvalidKeysetCommitment { .. })
+            ));
+        }
+
+        let mut bits = vec![false; n];
+        bits[2] = true;
+        let (proof, public_input) = Apk::<C>::prove(
+            &params,
+            keyset.clone(),
+            &commitment,
+            Bitmask::from_bits(&bits),
+        )
+        .unwrap();
+        assert_eq!(
+            Apk::<C>::verify(&params, commitment.clone(), &public_input, &proof),
+            Ok(true)
+        );
+
+        // Bit `domain_size + 2` evaluates at the same point as bit 2, so without the length
+        // check this bitmask would name a signer who does not exist.
+        let mut aliased = vec![false; 2 * domain_size];
+        aliased[domain_size + 2] = true;
+        for bits in [aliased, vec![true; n - 1], vec![true; n + 1]] {
+            let forged = AccountablePublicInputOf::<C> {
+                apk: public_input.apk,
+                bitmask: Bitmask::from_bits(&bits),
+            };
+            assert_eq!(
+                Apk::<C>::verify(&params, commitment.clone(), &forged, &proof),
+                Err(ApkError::BitmaskLengthMismatch {
+                    bitmask: bits.len(),
+                    keyset: n
+                })
+            );
+        }
+
+        // An apk with h + apk = 0 has no affine form to evaluate the constraints at.
+        let forged = AccountablePublicInputOf::<C> {
+            apk: (-C::InnerCurve::accumulator_seed().into()).into_affine(),
+            bitmask: Bitmask::from_bits(&bits),
+        };
+        assert_eq!(
+            Apk::<C>::verify(&params, commitment.clone(), &forged, &proof),
+            Err(ApkError::InvalidPublicInput(
+                "apk is the negated accumulator seed"
+            ))
+        );
+
+        // Counting: between 1 and the keyset size.
+        let (proof, public_input) =
+            Apk::<C>::prove_counting(&params, keyset, &commitment, Bitmask::from_bits(&bits))
+                .unwrap();
+        for count in [0, n + 1] {
+            let forged = CountingPublicInputOf::<C> {
+                apk: public_input.apk,
+                count,
+            };
+            assert_eq!(
+                Apk::<C>::verify_counting(&params, commitment.clone(), &forged, &proof),
+                Err(ApkError::CountOutOfRange {
+                    count,
+                    keyset_size: n
+                })
+            );
+        }
+        assert_eq!(
+            Apk::<C>::verify_counting(&params, commitment, &public_input, &proof),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_inputs() {
+        check_rejects_malformed_inputs::<Bls12_377Config>();
+        check_rejects_malformed_inputs::<Bls12_381Config>();
     }
 }

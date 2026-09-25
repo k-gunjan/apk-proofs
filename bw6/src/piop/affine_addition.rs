@@ -13,7 +13,7 @@ use crate::piop::{
     RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
 };
 use crate::utils::LagrangeEvaluations;
-use crate::{AccumulatorSeed, Keyset};
+use crate::{AccumulatorSeed, ApkError, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct PartialSumsCommitments<G: AffineRepr>(pub G, pub G);
@@ -166,10 +166,9 @@ where
 impl<F: FftField> AffineAdditionEvaluations<F> {
     pub fn evaluate_constraint_polynomials<IC, OC>(
         &self,
-        // apk: ark_bls12_377::G1Affine,
         apk: &IC::Affine,
         evals_at_zeta: &LagrangeEvaluations<F>,
-    ) -> Vec<F>
+    ) -> Result<Vec<F>, ApkError>
     where
         IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
@@ -189,9 +188,13 @@ impl<F: FftField> AffineAdditionEvaluations<F> {
                 y2,
             );
         let a3 = Constraints::<IC, OC>::evaluate_bitmask_booleanity_constraint(b);
-        let (a4, a5) =
-            Constraints::<IC, OC>::evaluate_public_inputs_constraints(*apk, &evals_at_zeta, x1, y1);
-        vec![a1, a2, a3, a4, a5]
+        let (a4, a5) = Constraints::<IC, OC>::evaluate_public_inputs_constraints(
+            *apk,
+            &evals_at_zeta,
+            x1,
+            y1,
+        )?;
+        Ok(vec![a1, a2, a3, a4, a5])
     }
 }
 
@@ -489,7 +492,6 @@ where
         )
     }
 
-    // TODO: better name
     pub fn compute_public_inputs_constraint_polynomials<D: DomainSet<OC::ScalarField>>(
         registers: &AffineAdditionRegisters<OC::ScalarField, D>,
     ) -> (
@@ -527,28 +529,31 @@ where
     }
 
     // pub fn evaluate_public_inputs_constraints<F: FftField, Affine: AffineRepr<BaseField = F> + std::borrow::Borrow<ark_ec::short_weierstrass::Affine<P>>, P: SWCurveConfig>(
+    /// Both points must have affine coordinates. `h` always does, being a fixed point off the
+    /// identity; `h + apk` does for any `apk` in G1, since `h` is outside G1. An `apk` outside
+    /// G1 can make `h + apk` the identity, and is rejected here.
     pub fn evaluate_public_inputs_constraints(
-        // apk: ark_bls12_377::G1Affine,
         apk: IC::Affine,
         evals_at_zeta: &LagrangeEvaluations<OC::ScalarField>,
         x1: OC::ScalarField,
         y1: OC::ScalarField,
-    ) -> (OC::ScalarField, OC::ScalarField) {
+    ) -> Result<(OC::ScalarField, OC::ScalarField), ApkError> {
         let h = IC::accumulator_seed();
         let apk_plus_h = (h + apk).into_affine();
-        #[allow(clippy::expect_used, reason = "invariant argued in the message")]
         let (h_x, h_y): (OC::ScalarField, OC::ScalarField) = h
             .xy()
             .map(|(x, y)| ((x).into(), (y).into()))
-            .expect("invariant: the accumulator seed is a fixed point off the identity");
+            .ok_or(ApkError::InvalidAccumulatorSeed)?;
         let (apk_plus_h_x, apk_plus_h_y): (OC::ScalarField, OC::ScalarField) = apk_plus_h
             .xy()
             .map(|(x, y)| ((x).into(), (y).into()))
-            .expect("invalid point");
+            .ok_or(ApkError::InvalidPublicInput(
+                "apk is the negated accumulator seed",
+            ))?;
 
         let c1 = (x1 - h_x) * evals_at_zeta.l_first + (x1 - apk_plus_h_x) * evals_at_zeta.l_last;
         let c2 = (y1 - h_y) * evals_at_zeta.l_first + (y1 - apk_plus_h_y) * evals_at_zeta.l_last;
-        (c1, c2)
+        Ok((c1, c2))
     }
 }
 
@@ -679,10 +684,10 @@ mod tests {
                 x1,
                 y1
             ),
-            (
+            Ok((
                 constraint_polys.0.evaluate(&zeta),
                 constraint_polys.1.evaluate(&zeta)
-            )
+            ))
         );
 
         // TODO: negative test?

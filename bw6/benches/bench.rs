@@ -192,11 +192,12 @@ fn verification(c: &mut Criterion) {
         let proof_counting = prover.prove_counting(bitmask.clone()).unwrap();
 
         let create_verifier = || {
-            Verifier::<InnerCurve, OuterCurve, TestPCS, BenchDomain>::new(
+            Verifier::<InnerCurve, OuterCurve, TestPCS, BenchDomain>::try_new(
                 pcs_params.raw_vk(),
                 pks_comm.clone(),
                 Bls12_377Config::transcript(),
             )
+            .unwrap()
         };
 
         group.bench_with_input(
@@ -205,7 +206,9 @@ fn verification(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let verifier = create_verifier();
-                    verifier.verify_simple(&proof_basic.1, &proof_basic.0);
+                    assert!(verifier
+                        .verify_simple(&proof_basic.1, &proof_basic.0)
+                        .unwrap());
                 })
             },
         );
@@ -216,7 +219,9 @@ fn verification(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let verifier = create_verifier();
-                    verifier.verify_packed(&proof_packed.1, &proof_packed.0);
+                    assert!(verifier
+                        .verify_packed(&proof_packed.1, &proof_packed.0)
+                        .unwrap());
                 })
             },
         );
@@ -227,7 +232,9 @@ fn verification(c: &mut Criterion) {
             |b, _| {
                 b.iter(|| {
                     let verifier = create_verifier();
-                    verifier.verify_counting(&proof_counting.1, &proof_counting.0);
+                    assert!(verifier
+                        .verify_counting(&proof_counting.1, &proof_counting.0)
+                        .unwrap());
                 })
             },
         );

@@ -261,7 +261,7 @@ where
             &public_input,
             proof,
         )
-        .expect("the commitment must name a domain this configuration can build"));
+        .expect("the commitment and public input must be well-formed"));
         end_timer!(t_apk);
 
         let t_bls = start_timer!(|| "aggregate BLS signature verification");

@@ -46,6 +46,11 @@ where
     pub pks_comm: (C, C),
     /// Size of the domain used to interpolate the vectors above.
     pub domain_size: u64,
+    /// Number of real keys; the rest of the domain, but for its last row, is padding. The
+    /// verifier holds a bitmask to exactly this many bits: a longer one would put bits on the
+    /// padding rows, or wrap past the domain onto the real keys, since row `domain_size + i`
+    /// evaluates at the same point as row `i`.
+    pub keyset_size: u64,
     _m: PhantomData<F>,
 }
 
@@ -174,6 +179,7 @@ where
         Ok(KeysetCommitment {
             pks_comm: (pks_x_comm, pks_y_comm),
             domain_size: domain_size as u64,
+            keyset_size: self.size() as u64,
             _m: PhantomData::default(),
         })
     }

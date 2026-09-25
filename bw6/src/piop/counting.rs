@@ -15,7 +15,7 @@ use crate::piop::{
     ProverProtocol, RegisterCommitments, RegisterEvaluations, RegisterPolynomials, VerifierProtocol,
 };
 use crate::utils::LagrangeEvaluations;
-use crate::{utils, AccumulatorSeed, Bitmask, CountingPublicInput, Keyset};
+use crate::{utils, AccumulatorSeed, ApkError, Bitmask, CountingPublicInput, Keyset};
 
 #[derive(CanonicalSerialize, CanonicalDeserialize)]
 pub struct CountingCommitments<G: AffineRepr> {
@@ -212,23 +212,23 @@ impl<F: FftField> CountingEvaluations<F> {
         apk: IC::Affine,
         count: OC::ScalarField,
         evals_at_zeta: &LagrangeEvaluations<OC::ScalarField>,
-    ) -> Vec<OC::ScalarField>
+    ) -> Result<Vec<OC::ScalarField>, ApkError>
     where
         IC: AccumulatorSeed,
         OC: CurveGroup<ScalarField = F>,
         F: From<IC::BaseField>,
     {
         let b_at_zeta = self.affine_addition_evaluations.bitmask;
-        [
+        Ok([
             self.affine_addition_evaluations
-                .evaluate_constraint_polynomials::<IC, OC>(&apk, evals_at_zeta),
+                .evaluate_constraint_polynomials::<IC, OC>(&apk, evals_at_zeta)?,
             self.partial_counts_evaluation.evaluate_constraints_at_zeta(
                 count,
                 b_at_zeta,
                 evals_at_zeta.l_last,
             ),
         ]
-        .concat()
+        .concat())
     }
 }
 

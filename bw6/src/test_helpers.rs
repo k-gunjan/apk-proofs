@@ -92,7 +92,7 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
     let prover = ProverOf::<C>::new(keyset, &pks_comm, params.clone(), C::transcript()).unwrap();
     end_timer!(t_prover_new);
 
-    let verifier = VerifierOf::<C>::new(params.raw_vk(), pks_comm, C::transcript());
+    let verifier = VerifierOf::<C>::try_new(params.raw_vk(), pks_comm, C::transcript()).unwrap();
 
     let bits = (0..keyset_size)
         .map(|_| rng.gen_bool(2.0 / 3.0))
@@ -158,7 +158,7 @@ where
         )
         .unwrap(),
         |prover, bitmask| prover.prove_simple(bitmask).unwrap(),
-        |verifier, public_input, proof| verifier.verify_simple(public_input, proof),
+        |verifier, public_input, proof| verifier.verify_simple(public_input, proof).unwrap(),
         keyset_size,
         proof_size(5, 6, group_bytes),
     );
@@ -181,7 +181,7 @@ where
         )
         .unwrap(),
         |prover, bitmask| prover.prove_counting(bitmask).unwrap(),
-        |verifier, public_input, proof| verifier.verify_counting(public_input, proof),
+        |verifier, public_input, proof| verifier.verify_counting(public_input, proof).unwrap(),
         keyset_size,
         proof_size(7, 8, group_bytes),
     );
@@ -207,7 +207,7 @@ pub fn test_packed_scheme(keyset_size: usize) {
         )
         .unwrap(),
         |prover, bitmask| prover.prove_packed(bitmask).unwrap(),
-        |verifier, public_input, proof| verifier.verify_packed(public_input, proof),
+        |verifier, public_input, proof| verifier.verify_packed(public_input, proof).unwrap(),
         keyset_size,
         proof_size(8, 9, GROUP_BYTES_761),
     );
@@ -346,7 +346,7 @@ where
     assert!(
         matches!(
             VerifierOf::<C>::try_new(params.raw_vk(), not_exact, C::transcript()),
-            Err(crate::DomainError::NotExact { .. })
+            Err(crate::ApkError::Domain(crate::DomainError::NotExact { .. }))
         ),
         "a domain size the field cannot realise exactly must be rejected"
     );
@@ -356,7 +356,7 @@ where
     assert!(
         matches!(
             VerifierOf::<C>::try_new(params.raw_vk(), too_large, C::transcript()),
-            Err(crate::DomainError::TooLarge { .. })
+            Err(crate::ApkError::Domain(crate::DomainError::TooLarge { .. }))
         ),
         "an unrealisable domain size must be rejected"
     );

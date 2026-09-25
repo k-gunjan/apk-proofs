@@ -453,7 +453,7 @@ mod tests {
         bits[2] = true;
         bits[9] = true;
         let (proof, public_input) = prover.prove_simple(Bitmask::from_bits(&bits)).unwrap();
-        assert!(verifier.verify_simple(&public_input, &proof));
+        assert!(verifier.verify_simple(&public_input, &proof).unwrap());
     }
 
     #[test]

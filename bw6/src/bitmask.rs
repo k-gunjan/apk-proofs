@@ -56,8 +56,9 @@ impl Bitmask {
 
     pub fn size(&self) -> usize {
         let repr_size = BITS_IN_LIMB * self.limbs.len();
-        let bitmask_size = repr_size - self.padding_size;
-        bitmask_size
+        // Saturating: a bitmask off the wire may claim more padding than it has bits. It then
+        // reads as empty, which no keyset size matches, rather than underflowing.
+        repr_size.saturating_sub(self.padding_size)
     }
 
     // TODO: padding

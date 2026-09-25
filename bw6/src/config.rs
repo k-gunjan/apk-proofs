@@ -237,7 +237,7 @@ where
     fn verifier(
         params: &PcsParamsOf<C>,
         commitment: KeysetCommitmentOf<C>,
-    ) -> Result<VerifierOf<C>, crate::DomainError> {
+    ) -> Result<VerifierOf<C>, crate::ApkError> {
         use w3f_pcs::pcs::PcsParams;
         VerifierOf::<C>::try_new(params.raw_vk(), commitment, C::transcript())
     }
@@ -255,15 +255,16 @@ where
 
     /// Checks a proof against a claimed aggregate key and bitmask.
     ///
-    /// Returns `false` for any invalid proof rather than panicking, and errors rather than
-    /// panicking when the commitment names a domain this configuration cannot build.
+    /// `Ok(false)` for a proof that does not verify. `Err` for inputs rejected before the proof
+    /// is looked at: a commitment whose sizes this configuration cannot use, or a public input
+    /// that is malformed — a bitmask of the wrong length, or an unusable aggregate key.
     pub fn verify(
         params: &PcsParamsOf<C>,
         commitment: KeysetCommitmentOf<C>,
         public_input: &AccountablePublicInputOf<C>,
         proof: &SimpleProofOf<C>,
-    ) -> Result<bool, crate::DomainError> {
-        Ok(Self::verifier(params, commitment)?.verify_simple(public_input, proof))
+    ) -> Result<bool, crate::ApkError> {
+        Self::verifier(params, commitment)?.verify_simple(public_input, proof)
     }
 
     /// Proves only how many validators signed, not which ones.
@@ -277,13 +278,15 @@ where
     }
 
     /// Checks a counting proof against a claimed aggregate key and signer count.
+    ///
+    /// As [`Apk::verify`]; a count of zero or above the keyset size is an `Err`.
     pub fn verify_counting(
         params: &PcsParamsOf<C>,
         commitment: KeysetCommitmentOf<C>,
         public_input: &CountingPublicInputOf<C>,
         proof: &CountingProofOf<C>,
-    ) -> Result<bool, crate::DomainError> {
-        Ok(Self::verifier(params, commitment)?.verify_counting(public_input, proof))
+    ) -> Result<bool, crate::ApkError> {
+        Self::verifier(params, commitment)?.verify_counting(public_input, proof)
     }
 }
 
@@ -314,8 +317,8 @@ where
         commitment: KeysetCommitmentOf<C>,
         public_input: &AccountablePublicInputOf<C>,
         proof: &PackedProofOf<C>,
-    ) -> Result<bool, crate::DomainError> {
-        Ok(Self::verifier(params, commitment)?.verify_packed(public_input, proof))
+    ) -> Result<bool, crate::ApkError> {
+        Self::verifier(params, commitment)?.verify_packed(public_input, proof)
     }
 }
 
