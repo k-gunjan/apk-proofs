@@ -1,34 +1,16 @@
+//! The O(n^2) reference domain. Compiled for tests and under `test-utils` only: nothing on
+//! the prover's or verifier's path uses it.
+
 use ark_ff::PrimeField;
-use ark_std::convert::TryInto;
-use num_bigint::BigUint;
-use num_integer::Integer;
 
-use super::types::FftDomain;
+use super::subgroup::subgroup_generator;
+use super::types::{evaluate_at_powers, FftDomain};
 
-/// The generator of the order-`n` subgroup of `F*`, or `None` when no such subgroup exists.
-///
-/// `F*` is cyclic of order `q - 1`, so it has a subgroup of order `n` exactly when `n | q - 1`,
-/// and `GENERATOR^((q-1)/n)` generates it. This is the general form of what arkworks' radix-2
-/// domains do with `TWO_ADIC_ROOT_OF_UNITY`, and agrees with them on power-of-two `n`: that root
-/// is itself `GENERATOR^((q-1)/2^TWO_ADICITY)`.
-pub fn subgroup_generator<F: PrimeField>(n: usize) -> Option<F> {
-    if n == 0 {
-        return None;
-    }
-    let group_order: BigUint = Into::<BigUint>::into(F::MODULUS) - 1u8;
-    let (cofactor, remainder) = group_order.div_rem(&BigUint::from(n));
-    if remainder != BigUint::from(0u32) {
-        return None;
-    }
-    let cofactor: F::BigInt = cofactor.try_into().ok()?;
-    Some(F::GENERATOR.pow(cofactor))
-}
-
-/// An evaluation domain that transforms by direct O(n^2) evaluation.
+/// An evaluation domain that transforms by naive O(n^2) evaluation.
 ///
 /// This works for any `n` dividing `q - 1`, with no smoothness requirement at all, which makes it
 /// the reference implementation: the Cooley-Tukey and Rader domains are differential-tested
-/// against it. It is also the fallback for sizes whose factorisation admits nothing better.
+/// against it, and benchmarked against it in `benches/`.
 ///
 /// It is not the domain to prove with. At n = 1551 a single transform is on the order of a
 /// million field multiplications.
@@ -57,31 +39,6 @@ impl<F: PrimeField> NaiveDomain<F> {
             size_inv,
         })
     }
-
-    /// Evaluates `coeffs` at `1, g, g^2, ..., g^(size-1)` by Horner, one point at a time.
-    ///
-    /// `coeffs` shorter than the domain is fine and means the high coefficients are zero;
-    /// longer would alias modulo `X^size - 1`, so it is rejected.
-    fn evaluate_at_powers(&self, coeffs: &[F], g: F) -> Vec<F> {
-        assert!(
-            coeffs.len() <= self.size,
-            "{} coefficients do not fit a domain of size {}",
-            coeffs.len(),
-            self.size
-        );
-        let mut result = Vec::with_capacity(self.size);
-        let mut point = F::one();
-        for _ in 0..self.size {
-            result.push(
-                coeffs
-                    .iter()
-                    .rev()
-                    .fold(F::zero(), |acc, &c| acc * point + c),
-            );
-            point *= g;
-        }
-        result
-    }
 }
 
 impl<F: PrimeField> FftDomain<F> for NaiveDomain<F> {
@@ -101,8 +58,16 @@ impl<F: PrimeField> FftDomain<F> for NaiveDomain<F> {
         self.size_inv
     }
 
+    /// `coeffs` shorter than the domain is fine and means the high coefficients are zero;
+    /// longer would alias modulo `X^size - 1`, so it is rejected.
     fn fft(&self, coeffs: &[F]) -> Vec<F> {
-        self.evaluate_at_powers(coeffs, self.w)
+        assert!(
+            coeffs.len() <= self.size,
+            "{} coefficients do not fit a domain of size {}",
+            coeffs.len(),
+            self.size
+        );
+        evaluate_at_powers(coeffs, self.w, self.size)
     }
 
     fn interpolate(&self, evals: &[F]) -> Vec<F> {
@@ -111,7 +76,7 @@ impl<F: PrimeField> FftDomain<F> for NaiveDomain<F> {
             self.size,
             "interpolation needs exactly `size` evaluations"
         );
-        let mut coeffs = self.evaluate_at_powers(evals, self.w_inv);
+        let mut coeffs = evaluate_at_powers(evals, self.w_inv, self.size);
         coeffs.iter_mut().for_each(|c| *c *= self.size_inv);
         coeffs
     }
@@ -121,8 +86,7 @@ impl<F: PrimeField> FftDomain<F> for NaiveDomain<F> {
 mod tests {
     use super::*;
     use crate::Radix2Domain;
-    use ark_ff::Field;
-    use ark_std::{test_rng, One, UniformRand, Zero};
+    use ark_std::{test_rng, UniformRand, Zero};
 
     // BW6-761's scalar field: two-adicity 46, so radix-2 sizes exist and can be cross-checked.
     type Fr761 = ark_bw6_761::Fr;
@@ -178,7 +142,7 @@ mod tests {
     fn amplifying_to_a_larger_domain_preserves_the_polynomial() {
         let rng = &mut test_rng();
         let small = NaiveDomain::<Fr767>::new(253).unwrap(); // 11 * 23
-        let large = NaiveDomain::<Fr767>::new(1551).unwrap(); // 3 * 11 * 47, and 1551 >= 4*253 - 2
+        let large = NaiveDomain::<Fr767>::new(1551).unwrap(); // 3 * 11 * 47, and 1551 >= 4*253 - 3
         assert_ne!(
             large.size() % small.size(),
             0,
@@ -213,17 +177,5 @@ mod tests {
         use ark_ff::FftField;
         assert_eq!(Fr767::TWO_ADICITY, 1);
         assert_eq!(Fr761::TWO_ADICITY, 46);
-    }
-
-    #[test]
-    fn subgroup_generator_has_the_claimed_order() {
-        for n in [2usize, 3, 9, 11, 23, 47, 1551, 9306] {
-            let w = subgroup_generator::<Fr767>(n).unwrap();
-            assert!(w.pow([n as u64]).is_one(), "w^{} != 1", n);
-            // and no smaller power of a proper divisor is 1, for the prime cases
-            if n > 1 && [2usize, 3, 11, 23, 47].contains(&n) {
-                assert!(!w.is_one(), "generator collapsed to 1 for n = {}", n);
-            }
-        }
     }
 }

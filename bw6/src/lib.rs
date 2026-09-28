@@ -1,4 +1,9 @@
-//! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys
+//! Succinct proofs of a BLS public key being an aggregate key of a subset of signers given a commitment to the set of all signers' keys.
+//!
+//! The protocol, its security model and its use in accountable light clients are described in
+//! Ciobotaru, Shirazi, Stewart, Vasilyev, "Accountable Light Client Systems for Proof-of-Stake
+//! Blockchains", <https://eprint.iacr.org/2022/1205>. Start from [`config`], which is the API
+//! the crate is meant to be used through.
 // This crate runs inside long-lived services that must survive bad input, so a panic outside
 // tests has to be either an error returned instead or an invariant argued at the site, under an
 // `#[allow(..., reason = ...)]` that says why it cannot fire. `assert!` is not covered by any
@@ -51,9 +56,11 @@ pub use config::{
     CountingProofOf, CountingPublicInputOf, KeysetCommitmentOf, KeysetOf, PackedProofOf,
     PcsParamsOf, ProverOf, ScalarOf, SimpleProofOf, VerifierOf,
 };
+#[cfg(any(test, feature = "test-utils"))]
+pub use domain::NaiveDomain;
 pub use domain::{
-    CooleyTukeyDomain, DomainError, DomainSet, DomainSizes, DomainTriple, FftDomain, NaiveDomain,
-    Radix2Domain, Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme,
+    CooleyTukeyDomain, DomainError, DomainSet, DomainSizes, DomainTriple, FftDomain, Radix2Domain,
+    Radix2DomainSet, SmoothDomainSet, SupportsPackedScheme,
 };
 
 mod transcript;
@@ -76,7 +83,7 @@ pub mod setup;
 )]
 pub mod test_helpers;
 
-/// Trait to extract the underlying curve point from a type e.g. commitment and get it back.
+/// Converts between a commitment type and the single curve point it wraps.
 pub trait CommitmentExt<F: PrimeField> {
     type Affine: AffineRepr<ScalarField = F>;
 
@@ -101,8 +108,8 @@ impl<C: CurveGroup> CommitmentExt<C::ScalarField> for WrappedAffine<C> {
     }
 }
 
-// TODO: 1. From trait?
-// TODO: 2. remove refs/clones
+/// What a scheme's verifier is told: built from the aggregate key and the bitmask, and
+/// absorbed into the Fiat-Shamir transcript by both sides.
 pub trait PublicInput<C: CurveGroup>: CanonicalSerialize + CanonicalDeserialize {
     fn new(apk: &C::Affine, bitmask: &Bitmask) -> Self;
 }
@@ -110,7 +117,8 @@ pub trait PublicInput<C: CurveGroup>: CanonicalSerialize + CanonicalDeserialize 
 /// Public input of the 'basic' and 'packed' schemes.
 ///
 /// The verifier does not check that `apk` is in G1, or even on the curve: a proof that verifies
-/// implies both. It only rejects the identity and `-h`, which it cannot evaluate. The last-row constraint fixes the accumulator's final value `h + S`, where `S` is the sum
+/// implies both. It only rejects the identity and `-h`, which it cannot evaluate. The last-row
+/// constraint fixes the accumulator's final value `h + S`, where `S` is the sum
 /// of the selected keys, to equal `h + apk` as the verifier computes it, and the chord through
 /// `h` and a given result meets the curve's formulas at one `apk` only — `S` — whether or not
 /// the `apk` supplied was on the curve. `S` is in G1 when every key behind the keyset
@@ -151,7 +159,8 @@ impl<C: CurveGroup> PublicInput<C> for CountingPublicInput<C> {
     }
 }
 
-/// Generic proof structure for APK proofs
+/// The proof of every scheme: two rounds of register commitments, the quotient, evaluations at
+/// `zeta`, and two opening proofs.
 ///
 /// Generic over:
 /// - `F`: Field type (scalar field of the outer curve)
@@ -174,21 +183,21 @@ where
     pub register_commitments: C,
     /// Second round commitments (used in "packed" scheme after bitmask aggregation challenge)
     pub additional_commitments: AC,
-    /// Quotient polynomial commitment (after receiving φ challenge)
+    /// Quotient polynomial commitment (after receiving the constraint-aggregation challenge φ)
     pub q_comm: Comm,
     /// Register polynomial evaluations at ζ
     pub register_evaluations: E,
     /// Quotient polynomial evaluation at ζ
     pub q_zeta: F,
-    /// Linearization polynomial evaluation at ζω
+    /// Linearization polynomial evaluation at ζω, where ω generates the base domain
     pub r_zeta_omega: F,
-    /// Opening proof for aggregated polynomial at ζ
+    /// Opening proof at ζ for the random combination of every polynomial evaluated there
     pub w_at_zeta_proof: OProof,
     /// Opening proof for linearization polynomial at ζω
     pub r_at_zeta_omega_proof: OProof,
 }
 
-/// Simple proof type (basic scheme without bitmask packing)
+/// Proof of the 'basic' scheme: the bitmask is public and the verifier evaluates it itself.
 pub type SimpleProof<F, G, Comm, OProof> = Proof<
     F,
     AffineAdditionEvaluationsWithoutBitmask<F>,
@@ -198,7 +207,7 @@ pub type SimpleProof<F, G, Comm, OProof> = Proof<
     OProof,
 >;
 
-/// Packed proof type (with bitmask packing for succinctness)
+/// Proof of the 'packed' scheme: the bitmask is committed to and checked in 256-bit chunks.
 pub type PackedProof<F, G, Comm, OProof> = Proof<
     F,
     SuccinctAccountableRegisterEvaluations<F>,
@@ -207,14 +216,15 @@ pub type PackedProof<F, G, Comm, OProof> = Proof<
     Comm,
     OProof,
 >;
-/// Counting proof type (only proves count, not individual bits)
+/// Proof of the 'counting' scheme: proves how many keys were aggregated, not which.
 pub type CountingProof<F, G, Comm, OProof> =
     Proof<F, CountingEvaluations<F>, CountingCommitments<G>, (), Comm, OProof>;
 
 /// `(0, sqrt(b))`: a point on the curve `y^2 = x^3 + b` but outside its prime-order subgroup.
 ///
-/// On a curve with `a = 0` any point with `x = 0` is a flex point, so it has order 3; as long as
-/// 3 does not divide the subgroup order, it cannot lie in the subgroup. Of the two square roots
+/// On a curve with `a = 0` any point with `x = 0` is a flex point: the tangent there meets the
+/// curve only at that point, so it has order 3. As long as 3 does not divide the subgroup
+/// order, it cannot lie in the subgroup. Of the two square roots
 /// the numerically smaller is taken, so the point is the same on every machine: `(0, 1)` on
 /// BLS12-377 (`b = 1`) and `(0, 2)` on BLS12-381 (`b = 4`).
 ///
@@ -252,8 +262,8 @@ pub trait AccumulatorSeed: PrimeSubgroup {
 ///
 /// Implemented per curve rather than for every short Weierstrass curve at once, so that a curve
 /// with a cheaper test than multiplication by the group order can use it: BW6-761 uses the
-/// endomorphism test in [`crate::endo`]. BW6-767 multiplies by the group order for now, as its
-/// authors' implementation does. Both the inner and the outer curve of every
+/// endomorphism test in [`crate::endo`], BLS12-381 arkworks' endomorphism test. BLS12-377 and
+/// BW6-767 multiply by the group order. Both the inner and the outer curve of every
 /// [`ApkConfig`] implement it; see `crate::instances`.
 pub trait PrimeSubgroup: CurveGroup {
     /// Whether `p` is on the curve and in the prime-order subgroup.
@@ -285,7 +295,9 @@ impl<G: AffineRepr> OpeningProofPoints<G> for G {
     }
 }
 
-// TODO: switch to better hash to curve when available
+/// A curve point derived deterministically from `message`: Blake2s seeds an rng, which samples
+/// a point with arkworks' `UniformRand`.
+/// // TODO: switch to better hash to curve when available
 pub fn hash_to_curve<G: CurveGroup>(message: &[u8]) -> G {
     use ark_std::rand::SeedableRng;
     use blake2::Digest;
@@ -335,10 +347,9 @@ mod tests {
     // APK-381. 516 keys need a domain of at least 517, which is 11 * 47 exactly; the expanded
     // domains are then 1034 and 3102. None is a power of two, and none is a multiple of 4.
     //
-    // 517 rather than the smaller 253 on purpose: ark-poly switches polynomial division to an
-    // FFT-based algorithm once the divisor's degree reaches 256, which this field cannot
-    // support. Every 381 test used to sit just under that line, so the prover panicked for
-    // every real validator set while the suite stayed green.
+    // 517 rather than the smaller 253 on purpose: ark-poly's polynomial division switches to an
+    // FFT-based algorithm once the divisor's degree reaches 256, which
+    // this field cannot support.
     #[test]
     fn test_simple_scheme_381() {
         test_helpers::test_simple_scheme_381(516);

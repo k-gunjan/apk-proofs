@@ -61,8 +61,8 @@ impl_pointwise_op!(Mul, mul, MulAssign, mul_assign, *=);
 ///
 /// The domains themselves come from a [`DomainSet`], which chooses the trace domain `H` of size
 /// `n` together with the two larger ones that hold products of register polynomials in
-/// evaluation form. The constraint polynomial has degree up to `4n - 3`, so recovering it takes
-/// `4n - 2` evaluations.
+/// evaluation form. The largest product interpolated back has degree `4n - 4`, so the large
+/// domain needs at least `4n - 3` points; see [`crate::DomainTriple`].
 ///
 /// The names `domain2x` / `domain4x` are historical. On APK-377 they really are `2n` and `4n`;
 /// on APK-381 they are `2n` and `6n`. All the protocol requires is that they be large enough,
@@ -76,7 +76,7 @@ pub struct Domains<F: PrimeField, D: DomainSet<F>> {
     pub l_first_evals_over_4x: Evals<F>,
     /// Last  Lagrange basis polynomial L_{n-1} of degree n evaluated over the large domain; L_{n-1}(\omega^{n-1}}) = 1
     pub l_last_evals_over_4x: Evals<F>,
-    /// \omega, a primitive n-th root of unity. Multiplicative generator of the smaller domain.
+    /// \omega, a primitive n-th root of unity. Multiplicative generator of the base domain.
     pub omega: F,
     /// \omega^{n-1}
     pub omega_inv: F,
@@ -112,10 +112,10 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
             2 * n - 1
         );
         assert!(
-            domains.large().size() >= 4 * n - 2,
+            domains.large().size() >= 4 * n - 3,
             "domain4x too small: {} < {}",
             domains.large().size(),
-            4 * n - 2
+            4 * n - 3
         );
 
         let l_first = Self::first_lagrange_basis_polynomial(n);
@@ -148,21 +148,21 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
         self.domains.medium()
     }
 
-    /// The domain holding at least `4n - 2` points.
+    /// The domain holding at least `4n - 3` points.
     pub fn domain4x(&self) -> &D::Domain {
         self.domains.large()
     }
 
-    /// Interpolates the evaluations over the smaller domain,
-    /// resulting in a degree < n polynomial.
+    /// Interpolates evaluations over the base domain into the unique polynomial of degree `< n`
+    /// taking them.
     pub fn interpolate(&self, evals: Vec<F>) -> DensePolynomial<F> {
         // TODO: assert evals.len()
         DensePolynomial::from_coefficients_vec(self.domain().interpolate(&evals))
     }
 
     /// Interpolates evaluations taken over the 4x domain back into coefficient form.
-    /// Exact because `from_set` guarantees `domain4x.size() >= 4n - 2`, the degree bound of the
-    /// highest-degree constraint polynomial.
+    /// Exact for polynomials of degree at most `4n - 4`, since `from_set` guarantees
+    /// `domain4x.size() >= 4n - 3`; that covers every product of registers the PIOP forms.
     pub fn interpolate_4x(&self, evals: &Evals<F>) -> DensePolynomial<F> {
         DensePolynomial::from_coefficients_vec(self.domain4x().interpolate(&evals.evals))
     }
@@ -172,22 +172,24 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
         DensePolynomial::from_coefficients_vec(self.domain2x().interpolate(&evals.evals))
     }
 
-    /// Produces evaluations of the degree < n polynomial over the larger domain.
+    /// Evaluates a polynomial of degree `< n` over the large domain.
     pub fn amplify_polynomial(&self, poly: &DensePolynomial<F>) -> Evals<F> {
         // TODO: assert poly.degree()
         self.domain4x().fft(&poly.coeffs).into()
     }
 
+    /// Evaluations over the large domain of the polynomial taking `evals` over the base domain.
     pub fn amplify(&self, evals: Vec<F>) -> Evals<F> {
         Self::_amplify(evals, self.domain(), self.domain4x())
     }
 
-    /// Checks if the polynomial is identically zero over the smaller domain.
+    /// Whether the polynomial vanishes at every point of the base domain.
     pub fn is_zero(&self, poly: &DensePolynomial<F>) -> bool {
         self.domain().divide_by_vanishing_poly(poly).1 == DensePolynomial::zero()
     }
 
-    /// Divides by the vanishing polynomial of the smaller domain.
+    /// Divides by the vanishing polynomial `X^n - 1` of the base domain, returning
+    /// `(quotient, remainder)`.
     pub fn compute_quotient(
         &self,
         poly: &DensePolynomial<F>,
@@ -195,19 +197,20 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
         self.domain().divide_by_vanishing_poly(poly)
     }
 
-    /// Degree n polynomial c * L_{n-1} evaluated over the large domain.
+    /// `c * L_{n-1}`, of degree `n - 1`, evaluated over the large domain.
     pub fn l_last_scaled_by(&self, c: F) -> Evals<F> {
         &self.constant_4x(c) * &self.l_last_evals_over_4x
     }
 
+    /// The constant polynomial `c` evaluated over the large domain.
     pub fn constant_4x(&self, c: F) -> Evals<F> {
         // TODO: ConstantEvaluations to save memory
         vec![c; self.domain4x().size()].into()
     }
 
-    /// Produces evaluations of a degree n polynomial over the large domain, given evaluations
-    /// over the small one. That allows arithmetic operations with degree n polynomials in
-    /// evaluation form until the result exceeds the large domain's degree bound.
+    /// Evaluations over `domain_nx` of the degree `< n` polynomial taking `evals` over `domain`.
+    /// Products of such polynomials can then be formed pointwise, and are exact as long as
+    /// their degree stays below `domain_nx.size()`.
     fn _amplify(evals: Vec<F>, domain: &D::Domain, domain_nx: &D::Domain) -> Evals<F> {
         let coeffs = domain.interpolate(&evals);
         domain_nx.fft(&coeffs).into()
@@ -277,6 +280,7 @@ impl<F: PrimeField, D: DomainSet<F>> Domains<F, D> {
         }
     }
 
+    /// Same as [`Self::amplify`].
     pub fn amplify_x4(&self, evals: Vec<F>) -> Evals<F> {
         Self::_amplify(evals, self.domain(), self.domain4x())
     }
@@ -294,8 +298,8 @@ mod tests {
 
     type TestDomains = Domains<Fr, Radix2DomainSet<Fr>>;
 
-    /// Pins the identity that the (temporarily removed) coset fast path in `amplify_x2` relies
-    /// on, so it can be restored against a working reference.
+    /// Pins, directly against arkworks, the identity the coset fast path in `amplify_x2`
+    /// relies on.
     #[test]
     fn test_coset_amplify() {
         let rng = &mut test_rng();
@@ -304,11 +308,11 @@ mod tests {
         // Let H < G be a subgroup of index 2 (meaning |G| = 2|H|).
         // Then G = H \cup gH, where g is a generator of G.
 
-        // Let |H| = n + 1. Observe that
-        // evaluations of a degree n polynomial p(X) = a_0 + ... + a_n.X^n over a coset gH
+        // Let |H| = n. Observe that
+        // evaluations of a polynomial p(X) = a_0 + ... + a_{n-1}.X^{n-1} over a coset gH
         // are equal to the
-        // evaluations of the polynomial p'(X) = a_0 + ... + (a_n.g^n).X^n over the subgroup H:
-        // p(gH) = p'(H).
+        // evaluations of the polynomial p'(X) = a_0 + ... + (a_{n-1}.g^{n-1}).X^{n-1} over the
+        // subgroup H: p(gH) = p'(H).
 
         // Thus p(G) can be computed either with a 2n-FFT,
         // or as p(G) = p(H \cup gH) = p(H) \cup p(gH) = p(H) \cup p'(H) with 2 n-FFTs.
@@ -360,8 +364,8 @@ mod tests {
         assert_eq!(domains.interpolate_4x(&evals4x_from_poly), poly);
     }
 
-    /// `amplify_x2` must produce the same evaluations as a direct 2n-point FFT. This is what
-    /// makes dropping the coset fast path result-preserving.
+    /// `amplify_x2` must produce the same evaluations as a direct 2n-point FFT, whichever path
+    /// it takes.
     #[test]
     fn test_amplify_2x() {
         let rng = &mut test_rng();
@@ -391,7 +395,7 @@ mod tests {
         assert_eq!(domains.l_last_scaled_by(c), domains.amplify(c_ln));
     }
 
-    /// Radix-2 domains are nested at exactly the ratio the old code hardcoded as `4`.
+    /// Radix-2 domains nest at index 4 (large) and 2 (medium).
     #[test]
     fn radix2_domains_are_nested() {
         let domains = TestDomains::new(64);
@@ -430,9 +434,9 @@ mod tests {
         }
     }
 
-    /// The rotation fast path and the coefficient-scaling fallback must agree. The radix-2
-    /// domain takes the rotation branch, so this pins the branch BW6-767 will actually use
-    /// against the one that is already exercised by every existing proof test.
+    /// The rotation fast path and the coefficient-scaling fallback must agree. Both production
+    /// triples nest, so every proof takes the rotation branch; this pins the fallback, which
+    /// only a non-nesting triple would take, against it.
     #[test]
     fn shift_fallback_agrees_with_the_rotation_fast_path() {
         let rng = &mut test_rng();
@@ -483,6 +487,6 @@ mod tests {
         let domains = TestDomains::new(33); // rounds up to 64
         assert_eq!(domains.size, 64);
         assert!(domains.domain2x().size() >= 2 * 64 - 1);
-        assert!(domains.domain4x().size() >= 4 * 64 - 2);
+        assert!(domains.domain4x().size() >= 4 * 64 - 3);
     }
 }

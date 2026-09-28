@@ -53,11 +53,13 @@ pub trait ApkConfig: 'static + Sized {
     /// rather than forcing callers back to a concrete curve. See `examples/`.
     type InnerPairing: Pairing<G1 = Self::InnerCurve>;
 
-    /// Where the proof is computed. Its scalar field is `InnerCurve`'s base field, which is what
-    /// lets inner-curve coordinates be manipulated as native field elements.
+    /// The group the commitment scheme works in. Its scalar field is `InnerCurve`'s base field,
+    /// which is what lets inner-curve coordinates be manipulated as native field elements.
     ///
-    /// The verifier checks every curve point of a proof against [`crate::PrimeSubgroup`] before
-    /// it reaches the pairing, so the outer curve's test should be a fast one.
+    /// Both sides compute here: the prover commits and opens, and the verifier checks every
+    /// curve point of a proof against [`crate::PrimeSubgroup`] before it reaches the pairing,
+    /// and combines commitments linearly. The subgroup test is on the verifier's path, so it
+    /// should be a fast one.
     type OuterCurve: CurveGroup + crate::PrimeSubgroup;
 
     /// Commitment scheme over the outer curve. Its opening proofs must list their curve points,
@@ -67,8 +69,9 @@ pub trait ApkConfig: 'static + Sized {
         Proof: crate::OpeningProofPoints<<Self::OuterCurve as CurveGroup>::Affine>,
     >;
 
-    /// The `n, 2n, kn` triple of evaluation domains, and the shift that goes with them. This is
-    /// the component that cannot be shared between configurations: see [`crate::domain`].
+    /// The triple of evaluation domains — `n, 2n, 4n` on APK-377, `n, 2n, 6n` on APK-381 — and
+    /// the shift that goes with them. This is the component that cannot be shared between
+    /// configurations: see [`crate::domain`].
     type Domains: DomainSet<ScalarOf<Self>>;
 
     /// A fresh Fiat-Shamir transcript for this configuration.
@@ -108,27 +111,32 @@ pub type KeysetOf<C> = crate::Keyset<
 pub type KeysetCommitmentOf<C> =
     crate::KeysetCommitment<ScalarOf<C>, <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C>;
 
-/// Convenience aliases for a configuration's proof and public-input types.
+/// The 'basic' scheme's proof type for a configuration.
 pub type SimpleProofOf<C> = crate::SimpleProof<
     ScalarOf<C>,
     <<C as ApkConfig>::OuterCurve as CurveGroup>::Affine,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Proof,
 >;
+/// The 'packed' scheme's proof type for a configuration.
 pub type PackedProofOf<C> = crate::PackedProof<
     ScalarOf<C>,
     <<C as ApkConfig>::OuterCurve as CurveGroup>::Affine,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Proof,
 >;
+/// The 'counting' scheme's proof type for a configuration.
 pub type CountingProofOf<C> = crate::CountingProof<
     ScalarOf<C>,
     <<C as ApkConfig>::OuterCurve as CurveGroup>::Affine,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::C,
     <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Proof,
 >;
+/// The 'basic' and 'packed' schemes' public input for a configuration.
 pub type AccountablePublicInputOf<C> = crate::AccountablePublicInput<<C as ApkConfig>::InnerCurve>;
+/// The 'counting' scheme's public input for a configuration.
 pub type CountingPublicInputOf<C> = crate::CountingPublicInput<<C as ApkConfig>::InnerCurve>;
+/// The commitment-scheme parameters (for KZG, the SRS) for a configuration.
 pub type PcsParamsOf<C> = <<C as ApkConfig>::Pcs as PCS<ScalarOf<C>>>::Params;
 
 /// BLS12-377 signatures, proofs over BW6-761, KZG commitments, radix-2 domains.
@@ -143,7 +151,7 @@ impl ApkConfig for Bls12_377Config {
     type InnerCurve = crate::instances::bls12_377_bw6_761::InnerCurve;
     type InnerPairing = crate::instances::bls12_377_bw6_761::InnerPairing;
     type OuterCurve = crate::instances::bls12_377_bw6_761::OuterCurve;
-    type Pcs = crate::instances::bls12_377_bw6_761::kzg::PcsKzgBw6_761;
+    type Pcs = crate::instances::bls12_377_bw6_761::kzg::Pcs;
     type Domains = crate::instances::bls12_377_bw6_761::Domains761;
 }
 
@@ -192,7 +200,7 @@ where
     ///
     /// `keyset_size` is the number of validators, not a logarithm and not a domain size: which
     /// domain that implies is the configuration's business, and on APK-381 it is not a power of
-    /// two. Read it back with [`Apk::domain_size`] for ref.
+    /// two. Read it back with [`Apk::domain_size`].
     ///
     /// Whether the result is fit for production is the source's business, not this function's.
     /// See [`crate::setup`].
@@ -310,6 +318,7 @@ where
     PcsParamsOf<C>: Clone,
     C::Domains: crate::SupportsPackedScheme,
 {
+    /// As [`Apk::prove`], producing a 'packed' proof.
     pub fn prove_packed(
         params: &PcsParamsOf<C>,
         keyset: KeysetOf<C>,
@@ -319,6 +328,7 @@ where
         Self::prover(params, keyset, commitment)?.prove_packed(bitmask)
     }
 
+    /// As [`Apk::verify`], for a 'packed' proof.
     pub fn verify_packed(
         params: &PcsParamsOf<C>,
         commitment: KeysetCommitmentOf<C>,

@@ -60,9 +60,17 @@ impl<E: Pairing> SecretKey<E> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// let message = hash_to_g2(b"Hello, world!");
+    /// ```
+    /// use apk_proofs::bls::{PublicKey, SecretKey};
+    /// use ark_bls12_381::{Bls12_381, G2Projective};
+    ///
+    /// let rng = &mut ark_std::test_rng();
+    /// let sk = SecretKey::<Bls12_381>::new(rng);
+    /// // A stand-in for hash-to-G2: `hash_to_curve` samples a point from a seeded RNG.
+    /// let message: G2Projective = apk_proofs::hash_to_curve(b"Hello, world!");
+    ///
     /// let signature = sk.sign(&message);
+    /// assert!(PublicKey::from(&sk).verify(&signature, &message));
     /// ```
     pub fn sign(&self, message: &E::G2) -> Signature<E> {
         Signature(*message * self.as_ref())
@@ -98,10 +106,22 @@ impl<E: Pairing> PublicKey<E> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
+    /// ```
+    /// use apk_proofs::bls::{PublicKey, SecretKey, Signature};
+    /// use ark_bls12_381::{Bls12_381, G2Projective};
+    ///
+    /// let rng = &mut ark_std::test_rng();
+    /// let sk1 = SecretKey::<Bls12_381>::new(rng);
+    /// let sk2 = SecretKey::<Bls12_381>::new(rng);
+    /// let message: G2Projective = apk_proofs::hash_to_curve(b"Hello, world!");
+    ///
     /// let pk1 = PublicKey::from(&sk1);
     /// let pk2 = PublicKey::from(&sk2);
     /// let aggregate_pk = PublicKey::aggregate([pk1, pk2]);
+    ///
+    /// // The aggregate key verifies the aggregate of the signatures on the same message.
+    /// let aggregate_sig = Signature::aggregate([sk1.sign(&message), sk2.sign(&message)]);
+    /// assert!(aggregate_pk.verify(&aggregate_sig, &message));
     /// ```
     pub fn aggregate<P: Borrow<Self>>(public_keys: impl IntoIterator<Item = P>) -> Self {
         PublicKey(public_keys.into_iter().map(|p| p.borrow().0).sum::<E::G1>())
@@ -118,11 +138,20 @@ impl<E: Pairing> PublicKey<E> {
     ///
     /// # Example
     ///
-    /// ```rust,ignore
-    /// let message = hash_to_g2(b"Hello, world!");
+    /// ```
+    /// use apk_proofs::bls::{PublicKey, SecretKey};
+    /// use ark_bls12_381::{Bls12_381, G2Projective};
+    ///
+    /// let rng = &mut ark_std::test_rng();
+    /// let sk = SecretKey::<Bls12_381>::new(rng);
+    /// let message: G2Projective = apk_proofs::hash_to_curve(b"Hello, world!");
     /// let signature = sk.sign(&message);
     /// let pk = PublicKey::from(&sk);
     /// assert!(pk.verify(&signature, &message));
+    ///
+    /// // ...and not on any other message.
+    /// let other: G2Projective = apk_proofs::hash_to_curve(b"Goodbye, world!");
+    /// assert!(!pk.verify(&signature, &other));
     /// ```
     pub fn verify(&self, signature: &Signature<E>, message: &E::G2) -> bool {
         E::multi_pairing(

@@ -1,26 +1,22 @@
 use ark_ff::PrimeField;
 use num_bigint::BigUint;
 
-use super::naive::subgroup_generator;
-use super::types::FftDomain;
+use super::subgroup::subgroup_generator;
+use super::types::{evaluate_at_powers, FftDomain};
 
-/// Prime factors small enough that a direct O(p^2) DFT beats reducing them further.
+/// The largest prime factor transformed by a naive O(p^2) DFT; larger primes go through Rader.
 ///
-/// The cost model says a radix-p stage costs about `(p-1)^2` multiplications per block, i.e.
-/// `(p-1)^2 / p` per output point: 0.5 for p=2, 1.3 for p=3, 9.1 for p=11, 21 for p=23, 45 for
-/// p=47. Rader would replace a p-point DFT with two transforms of length >= 2p-3 plus a
-/// pointwise product; for p=47 that works out to roughly 3100 multiplications against 2116 for
-/// the direct DFT, so direct wins. Rader only pays off for the large factor 10177, where direct
-/// would be 103.5M against roughly 3.9M.
-const MAX_DIRECT_RADIX: usize = 64;
+/// On BW6-767's scalar field the usable primes are 2, 3, 11, 23, 47 and 10177, so any bound
+/// from 47 to 10176 behaves the same; 64 is a round number in that gap.
+const MAX_NAIVE_RADIX: usize = 64;
 
-/// A transform plan: a tree of Cooley-Tukey splits with direct DFTs at the leaves.
+/// A transform plan: a tree of Cooley-Tukey splits with naive DFTs, or Rader, at the leaves.
 ///
 /// Built once per domain and reused, so all twiddle factors are precomputed.
 #[derive(Clone, Debug)]
 enum Plan<F: PrimeField> {
-    /// Direct O(n^2) DFT over `1, w, ..., w^(n-1)`.
-    Direct { n: usize, w: F },
+    /// Naive O(n^2) DFT over `1, w, ..., w^(n-1)`.
+    Naive { n: usize, w: F },
     /// `n = n1 * n2`, transformed as `n1` inner DFTs of length `n2`, a twiddle multiplication,
     /// then `n2` outer DFTs of length `n1`.
     Split {
@@ -54,7 +50,7 @@ enum Plan<F: PrimeField> {
 impl<F: PrimeField> Plan<F> {
     fn size(&self) -> usize {
         match self {
-            Plan::Direct { n, .. } => *n,
+            Plan::Naive { n, .. } => *n,
             Plan::Split { n, .. } => *n,
             Plan::Rader { p, .. } => *p,
         }
@@ -69,12 +65,12 @@ impl<F: PrimeField> Plan<F> {
         debug_assert_eq!(factors.iter().product::<usize>(), n);
 
         // Only a single prime factor bottoms out. A composite always splits, however small:
-        // `MAX_DIRECT_RADIX` bounds the largest *prime* worth transforming directly, and using
+        // `MAX_NAIVE_RADIX` bounds the largest *prime* worth transforming naively, and using
         // it as a recursion cutoff too would end a power-of-two chain in a 64-point O(n^2) DFT
         // (63^2 multiplications) where six more radix-2 stages cost about 192.
         if factors.len() <= 1 {
-            if n <= MAX_DIRECT_RADIX {
-                return Some(Plan::Direct { n, w });
+            if n <= MAX_NAIVE_RADIX {
+                return Some(Plan::Naive { n, w });
             }
             return Self::build_rader(n, w);
         }
@@ -100,7 +96,7 @@ impl<F: PrimeField> Plan<F> {
             n1,
             n2,
             inner: Box::new(Plan::build(n2, w2, &factors[1..])?),
-            outer: Box::new(Plan::Direct { n: n1, w: w1 }),
+            outer: Box::new(Plan::Naive { n: n1, w: w1 }),
             twiddles,
         })
     }
@@ -109,7 +105,8 @@ impl<F: PrimeField> Plan<F> {
     ///
     /// Returns `None` when the field offers no usable convolution domain. That domain must be at
     /// least `2p - 3` long, must divide `q - 1`, and must not be a multiple of `p` — and it is
-    /// held to directly-transformable factors so this cannot recurse.
+    /// held to factors of at most `MAX_NAIVE_RADIX`, so its plan has only naive leaves and this
+    /// cannot recurse.
     fn build_rader(p: usize, w: F) -> Option<Self> {
         let g = primitive_root_mod(p)?;
         let n = p - 1;
@@ -119,7 +116,7 @@ impl<F: PrimeField> Plan<F> {
         }
 
         let min_conv = 2 * p - 3;
-        let m = admissible_sizes_bounded::<F>(MAX_DIRECT_RADIX, min_conv.saturating_mul(64))
+        let m = admissible_sizes_bounded::<F>(MAX_NAIVE_RADIX, min_conv.saturating_mul(64))
             .into_iter()
             .find(|&m| m >= min_conv && m % p != 0)?;
         let w_m = subgroup_generator::<F>(m)?;
@@ -153,20 +150,7 @@ impl<F: PrimeField> Plan<F> {
     /// Evaluates `coeffs` (zero-padded to the plan's size) over the plan's domain.
     fn eval(&self, coeffs: &[F]) -> Vec<F> {
         match self {
-            Plan::Direct { n, w } => {
-                let mut out = Vec::with_capacity(*n);
-                let mut point = F::one();
-                for _ in 0..*n {
-                    out.push(
-                        coeffs
-                            .iter()
-                            .rev()
-                            .fold(F::zero(), |acc, &c| acc * point + c),
-                    );
-                    point *= *w;
-                }
-                out
-            }
+            Plan::Naive { n, w } => evaluate_at_powers(coeffs, *w, *n),
             Plan::Split {
                 n,
                 n1,
@@ -302,11 +286,8 @@ fn prime_factors(mut n: usize) -> Vec<usize> {
 
 /// A mixed-radix Cooley-Tukey evaluation domain.
 ///
-/// Handles any `n` dividing `q - 1` whose prime factors are individually small enough for a
-/// direct DFT. Over BW6-767's scalar field that covers every divisor of
-/// `2 * 3^2 * 11 * 23 * 47 = 214038` — comfortably past any realistic validator count, since
-/// Polkadot and Kusama run on the order of a thousand. The one remaining usable factor, 10177,
-/// needs Rader's algorithm and only becomes necessary above roughly 53,500 validators.
+/// Handles any `n` dividing `q - 1` whose prime factors are each either small enough for a
+/// naive DFT (at most `MAX_NAIVE_RADIX`) or reachable by Rader's algorithm.
 #[derive(Clone, Debug)]
 pub struct CooleyTukeyDomain<F: PrimeField> {
     size: usize,
@@ -318,8 +299,9 @@ pub struct CooleyTukeyDomain<F: PrimeField> {
 }
 
 impl<F: PrimeField> CooleyTukeyDomain<F> {
-    /// Returns `None` if `F*` has no subgroup of order `size`, or if any prime factor of `size`
-    /// is too large for a direct DFT (those need Rader).
+    /// Returns `None` if `F*` has no subgroup of order `size`, or if a prime factor of `size`
+    /// is too large for a naive DFT and Rader's algorithm finds no usable convolution domain
+    /// for it.
     pub fn new(size: usize) -> Option<Self> {
         let w = subgroup_generator::<F>(size)?;
         let w_inv = w.inverse()?;
@@ -358,10 +340,12 @@ fn usable_prime_powers<F: PrimeField>(max_prime: usize) -> Vec<(usize, u32)> {
     powers
 }
 
-/// The subgroup orders below `max` whose prime factors are all at most `max_prime`, ascending.
+/// The subgroup orders of `F*` that are at most `max` and whose prime factors are all at most
+/// `max_prime`, ascending.
 ///
-/// Only Rader needs this now, to find a convolution domain: which sizes a *domain* may take is
-/// no longer discovered by enumeration but read off [`crate::APK381_DOMAIN_SIZES`].
+/// Only Rader needs this, to find a convolution domain. Which sizes a proof's domains take is
+/// not enumerated here but read off a [`crate::DomainSizes`] table, for APK-381
+/// [`crate::instances::bls12_381_bw6_767::APK381_DOMAIN_SIZES`].
 fn admissible_sizes_bounded<F: PrimeField>(max_prime: usize, max: usize) -> Vec<usize> {
     let mut sizes = vec![1usize];
     for (p, e) in usable_prime_powers::<F>(max_prime) {
@@ -439,7 +423,7 @@ mod tests {
         assert_eq!(prime_factors(256), vec![2; 8]);
     }
 
-    /// The whole justification for this domain: it must agree with the direct DFT everywhere.
+    /// The whole justification for this domain: it must agree with the naive DFT everywhere.
     #[test]
     fn agrees_with_naive_dft() {
         let rng = &mut test_rng();
@@ -576,85 +560,5 @@ mod tests {
 
         let evals: Vec<Fr767> = (0..n).map(|_| Fr767::rand(rng)).collect();
         assert_eq!(ct.fft(&ct.interpolate(&evals)), evals);
-    }
-}
-
-#[cfg(test)]
-mod perf {
-    use super::*;
-    use crate::domain::NaiveDomain;
-    use ark_std::{test_rng, UniformRand};
-    use std::time::Instant;
-
-    type Fr767 = ark_bw6_767::Fr;
-
-    /// Informational, not a gate: reports the speedup over the direct DFT so a silent fallback
-    /// to O(n^2) is visible. Run with `cargo test -- --ignored --nocapture`.
-    #[test]
-    #[ignore = "timing-dependent; informational"]
-    fn report_speedup_over_naive() {
-        let rng = &mut test_rng();
-        for n in [1551usize, 2277, 9306] {
-            let coeffs: Vec<Fr767> = (0..n).map(|_| Fr767::rand(rng)).collect();
-            let ct = CooleyTukeyDomain::<Fr767>::new(n).unwrap();
-            let naive = NaiveDomain::<Fr767>::new(n).unwrap();
-
-            let t = Instant::now();
-            let a = ct.fft(&coeffs);
-            let ct_us = t.elapsed().as_micros();
-
-            let t = Instant::now();
-            let b = naive.fft(&coeffs);
-            let naive_us = t.elapsed().as_micros();
-
-            assert_eq!(a, b);
-            println!(
-                "n = {:>6}: cooley-tukey {:>8} us, naive {:>9} us, speedup {:.1}x",
-                n,
-                ct_us,
-                naive_us,
-                naive_us as f64 / ct_us as f64
-            );
-        }
-    }
-}
-
-#[cfg(test)]
-mod comparison {
-    use super::*;
-    use crate::Radix2Domain;
-    use ark_std::{test_rng, UniformRand};
-    use std::time::Instant;
-
-    type Fr761 = ark_bw6_761::Fr;
-
-    /// Would one generalised Cooley-Tukey backend do for both curves? Radix-2 is just the case
-    /// where every factor is 2, so it is correct; the question is what it costs against
-    /// arkworks' specialised implementation.
-    #[test]
-    #[ignore = "timing-dependent; informational"]
-    fn cost_of_replacing_arkworks_radix2() {
-        let rng = &mut test_rng();
-        for k in [8u32, 10, 12, 14, 16] {
-            let n = 1usize << k;
-            let coeffs: Vec<Fr761> = (0..n).map(|_| Fr761::rand(rng)).collect();
-
-            let ct = CooleyTukeyDomain::<Fr761>::new(n).unwrap();
-            let r2 = Radix2Domain::<Fr761>::new(n);
-
-            let t = Instant::now();
-            let a = ct.fft(&coeffs);
-            let ct_us = t.elapsed().as_micros().max(1);
-
-            let t = Instant::now();
-            let b = r2.fft(&coeffs);
-            let r2_us = t.elapsed().as_micros().max(1);
-
-            assert_eq!(a, b, "the two backends must agree at n = {}", n);
-            println!(
-                "n = 2^{:<2} = {:>6}: generic CT {:>9} us, arkworks radix-2 {:>7} us  -> {:>6.1}x slower",
-                k, n, ct_us, r2_us, ct_us as f64 / r2_us as f64
-            );
-        }
     }
 }

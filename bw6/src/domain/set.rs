@@ -1,10 +1,9 @@
 //! The triple of evaluation domains the PIOP works over, and the two ways of producing it.
 //!
 //! The protocol needs three domains: the trace domain `H` of size `n`, and two larger ones that
-//! hold products of register polynomials in evaluation form. The constraint polynomial has
-//! degree up to `4n - 3`, so recovering it takes at least `4n - 2` evaluations.
+//! hold products of register polynomials in evaluation form.
 //!
-//! The protocol's demand on the two larger domains is only capacity — `2n - 1` and `4n - 2`
+//! The protocol's demand on the two larger domains is only capacity — `2n - 1` and `4n - 3`
 //! points — and that is all this module states. Which sizes a field actually offers, and how it
 //! reaches them from `n`, is left to the [`DomainSizes`] table the configuration supplies.
 //! Everything downstream — [`crate::Keyset`], [`crate::domains::Domains`], the PIOP, the prover
@@ -16,16 +15,16 @@ use ark_poly::univariate::DensePolynomial;
 use core::marker::PhantomData;
 
 use super::cooley_tukey::CooleyTukeyDomain;
-use super::naive::subgroup_generator;
 use super::radix2::Radix2Domain;
+use super::subgroup::subgroup_generator;
 use super::types::{DomainError, FftDomain, SupportsPackedScheme};
 
 /// The three domain sizes one proof is computed over.
 ///
 /// `base` is the trace domain `H`. The other two hold products of register polynomials in
 /// evaluation form, and the protocol's only demand on them is capacity: the constraint
-/// polynomials reach degree `2n - 2` and `4n - 3`, so recovering them takes `2n - 1` and
-/// `4n - 2` evaluations. Anything at or above those is correct. Which sizes a field actually
+/// polynomials reach degree `2n - 2` and `4n - 4`, so recovering them takes `2n - 1` and
+/// `4n - 3` evaluations. Anything at or above those is correct. Which sizes a field actually
 /// offers, and which of them are worth choosing, is not the protocol's business.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DomainTriple {
@@ -33,7 +32,7 @@ pub struct DomainTriple {
     pub base: usize,
     /// Holds at least `2n - 1` points.
     pub medium: usize,
-    /// Holds at least `4n - 2` points.
+    /// Holds at least `4n - 3` points.
     pub large: usize,
 }
 
@@ -49,14 +48,14 @@ impl DomainTriple {
     /// The protocol invariant, in one place. Both bounds are floors, not targets: a domain set
     /// is free to overshoot them, and on a field whose subgroup orders are sparse it must.
     pub const fn meets_protocol_bounds(&self) -> bool {
-        self.base >= 1 && self.medium >= 2 * self.base - 1 && self.large >= 4 * self.base - 2
+        self.base >= 1 && self.medium >= 2 * self.base - 1 && self.large >= 4 * self.base - 3
     }
 }
 
 /// The three domains a proof is computed over, chosen together.
 ///
 /// Chosen *together* because they are not independent: the protocol requires
-/// `medium >= 2n - 1` and `large >= 4n - 2`, and whether a domain of a given size exists at all
+/// `medium >= 2n - 1` and `large >= 4n - 3`, and whether a domain of a given size exists at all
 /// is a property of the field. Picking `n` first and then asking for `4n` separately is how the
 /// sizes silently fail to line up.
 pub trait DomainSet<F: PrimeField>: Clone + Sized {
@@ -76,7 +75,7 @@ pub trait DomainSet<F: PrimeField>: Clone + Sized {
     /// A domain of at least `2n - 1` points.
     fn medium(&self) -> &Self::Domain;
 
-    /// A domain of at least `4n - 2` points.
+    /// A domain of at least `4n - 3` points.
     fn large(&self) -> &Self::Domain;
 
     /// The triple whose base domain has *exactly* `size` points.
@@ -187,8 +186,7 @@ pub(crate) fn nesting_index<F: PrimeField, D: FftDomain<F>>(small: &D, large: &D
 /// Power-of-two domains `n, 2n, 4n`. Used by APK-377.
 ///
 /// BW6-761's scalar field has two-adicity 46, so every size the prover could afford is available
-/// and the classical radix-2 layout applies unchanged. This reproduces exactly what the crate
-/// did before the domain layer was abstracted.
+/// and the classical radix-2 layout applies unchanged.
 #[derive(Clone, Copy, Debug)]
 pub struct Radix2DomainSet<F: PrimeField> {
     base: Radix2Domain<F>,
@@ -359,10 +357,11 @@ impl<F: PrimeField, S: DomainSizes<F>> DomainSet<F> for SmoothDomainSet<F, S> {
     }
 }
 
-/// Deliberately **not** `impl SupportsPackedScheme for SmoothDomainSet`: `packed` splits the
-/// bitmask into 256-bit chunks and so needs `256 | n`, which a table of arbitrary subgroup
-/// orders cannot promise. On BW6-767, the field this exists for, it is outright impossible —
-/// `q - 1` carries a single factor of 2, so no domain size there is even a multiple of 4.
+// Deliberately **not** `impl SupportsPackedScheme for SmoothDomainSet`: `packed` splits the
+// bitmask into 256-bit chunks and so needs `256 | n`, which a table of arbitrary subgroup
+// orders cannot promise. On BW6-767, the field this exists for, it is outright impossible —
+// `q - 1` carries a single factor of 2, so no domain size there is even a multiple of 4.
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -395,7 +394,7 @@ mod tests {
             let set = Smooth::build(sizes).expect("entry must be constructible");
             assert_eq!(set.base().size(), n);
             assert!(set.medium().size() >= 2 * n - 1);
-            assert!(set.large().size() >= 4 * n - 2);
+            assert!(set.large().size() >= 4 * n - 3);
 
             // Nested, which is what makes `shifted_evals` take the rotation branch. At what
             // index is the table's choice, not the protocol's.
@@ -408,9 +407,9 @@ mod tests {
     #[test]
     fn protocol_bounds_are_the_degree_bounds_of_the_constraint_polynomials() {
         let n = 16;
-        assert!(DomainTriple::new(n, 2 * n - 1, 4 * n - 2).meets_protocol_bounds());
-        assert!(!DomainTriple::new(n, 2 * n - 2, 4 * n - 2).meets_protocol_bounds());
-        assert!(!DomainTriple::new(n, 2 * n - 1, 4 * n - 3).meets_protocol_bounds());
+        assert!(DomainTriple::new(n, 2 * n - 1, 4 * n - 3).meets_protocol_bounds());
+        assert!(!DomainTriple::new(n, 2 * n - 2, 4 * n - 3).meets_protocol_bounds());
+        assert!(!DomainTriple::new(n, 2 * n - 1, 4 * n - 4).meets_protocol_bounds());
         // Overshooting is fine, and on a sparse field unavoidable.
         assert!(DomainTriple::new(n, 2 * n, 6 * n).meets_protocol_bounds());
     }
@@ -498,9 +497,8 @@ mod tests {
         DensePolynomial::from_coefficients_vec((0..degree_bound).map(|_| F::rand(rng)).collect())
     }
 
-    /// The rotation overrides must agree with the trait's always-correct default. This is the
-    /// regression guard for both configurations at once: it is what says the cheap path is the
-    /// same function as the general one.
+    /// The rotation branch of `shifted_evals` must agree with the coefficient-scaling one, and
+    /// both with direct evaluation of `p(Xw)`, on both configurations' domains.
     #[test]
     fn rotation_agrees_with_coefficient_scaling() {
         fn check<F: ark_ff::PrimeField, D: DomainSet<F>>(set: &D) {
@@ -509,7 +507,7 @@ mod tests {
 
             let rotated = set.shift_over_large(&poly, &evals);
 
-            // The trait default, spelled out: p(Xw) has coefficients c_i * w^i.
+            // The coefficient-scaling branch, spelled out: p(Xw) has coefficients c_i * w^i.
             let mut coeffs = poly.coeffs.clone();
             let mut power = F::one();
             for c in coeffs.iter_mut() {

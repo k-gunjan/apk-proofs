@@ -1,3 +1,5 @@
+//! Signer sets and their commitment.
+
 use crate::domain::{DomainSet, FftDomain};
 use crate::domains::{Domains, Evals};
 use crate::hash_to_curve;
@@ -11,31 +13,37 @@ use std::marker::PhantomData;
 use w3f_pcs::pcs::Commitment;
 use w3f_pcs::pcs::{CommitterKey, PCS};
 
-// Polynomial commitment to the vector of public keys.
-// Let 'pks' be such a vector that commit(pks) == KeysetCommitment::pks_comm, also let
-// domain_size := KeysetCommitment::domain.size and
-// keyset_size := KeysetCommitment::keyset_size
-// Then the verifier needs to trust that:
-// 1. a. pks.len() == KeysetCommitment::domain.size
-//    b. pks[i] lie in BLS12-377 G1 for i=0,...,domain_size-2
-//    c. for the 'real' keys pks[i], i=0,...,keyset_size-1, there exist proofs of possession
-//       for the padding, pks[i], i=keyset_size,...,domain_size-2, dlog is not known,
-//       e.g. pks[i] = hash_to_g1("something").
-//    pks[domain_size-1] is not a part of the relation (not constrained) and can be anything,
-//    we set pks[domain_size-1] = (0,0), not even a curve point.
-// 2. KeysetCommitment::domain is the domain used to interpolate pks
-//
-// In light client protocols the commitment is to the upcoming validator set, signed by the current validator set.
-// Honest validator checks the proofs of possession, interpolates with the right padding over the right domain,
-// computes the commitment using the right parameters, and then sign it.
-// Verifier checks the signatures and can trust that the properties hold under some "2/3 honest validators" assumption.
-// As every honest validator generates the same commitment, verifier needs to check only the aggregate signature.
-
-// The commitment type is generic over different PCS implementations. To extract the
-// underlying curve point, go through `CommitmentExt::to_affine` rather than reaching into the
-// concrete type: w3f-pcs's KZG, for instance, wraps the point as
-// `pub struct WrappedAffine<C: CurveGroup>(pub C::Affine)`, but nothing here should depend on
-// that.
+/// What the verifier knows a signer set by: commitments to the key coordinates, and the two
+/// sizes it needs to rebuild the domain and bound the bitmask.
+///
+/// Formally: let `pks` be
+/// a vector of public keys with `commit(pks) == KeysetCommitment::pks_comm`, and let
+/// `domain_size := KeysetCommitment::domain_size`,
+/// `keyset_size := KeysetCommitment::keyset_size`. Then the verifier needs to trust that:
+/// 1. `pks` is well-formed:
+///    - `pks.len() == domain_size`;
+///    - `pks[i]` lies in the inner curve's G1 for `i = 0,...,domain_size-2`;
+///    - for the real keys `pks[i]`, `i = 0,...,keyset_size-1`, there exist proofs of
+///      possession, and for the padding `pks[i]`, `i = keyset_size,...,domain_size-2`, the
+///      discrete log is not known.
+///
+///    `pks[domain_size-1]` is not part of the relation (not constrained) and could be anything.
+///    [`Keyset::new`] pads every row from `keyset_size` on, the last included, with the same
+///    point, `hash_to_curve(b"apk-proofs")`.
+/// 2. the coordinate vectors of `pks` are interpolated over the order-`domain_size` subgroup
+///    of `F*`, i.e. the domain `DomainSet::<F>::base_for_exact_size(domain_size)` returns.
+///
+/// In light client protocols the commitment is to the upcoming validator set, signed by the
+/// current validator set. An honest validator checks the proofs of possession, interpolates with
+/// the right padding over the right domain, computes the commitment using the right parameters,
+/// and then signs it. The verifier checks the signatures and trusts that the properties hold
+/// under an honest-supermajority(2/3 honest validators) assumption. As every honest validator computes the same
+/// commitment, the verifier needs to check only the aggregate signature.
+///
+/// The commitment type is generic over PCS implementations. To extract the underlying curve
+/// point, go through [`crate::CommitmentExt::to_affine`] rather than reaching into the concrete
+/// type: w3f-pcs's KZG, for instance, wraps the point as `WrappedAffine(pub C::Affine)`, but
+/// nothing here depends on that.
 #[derive(Clone, Default, Debug, PartialEq, Eq, CanonicalSerialize, CanonicalDeserialize)]
 pub struct KeysetCommitment<F, C>
 where
@@ -54,6 +62,8 @@ where
     _m: PhantomData<F>,
 }
 
+/// A signer set as the prover holds it: the keys, their padded interpolations over the base
+/// domain, and the domains themselves.
 #[derive(Clone)]
 pub struct Keyset<IC, OC, D>
 where
@@ -68,8 +78,8 @@ where
     pub(crate) pks_polys: [DensePolynomial<OC::ScalarField>; 2],
     // The domains used to compute the interpolations above, and to expand them.
     pub(crate) domains: D,
-    // Polynomials above, evaluated over at a domain of size at least (4n-2).
-    // Used by the prover to populate the AIR execution trace.
+    // Polynomials above, evaluated over the large domain (at least 4n - 3 points).
+    // Filled in by `amplify`, which `Prover::new` calls; used to populate the AIR execution trace.
     pub(crate) pks_evals_x4: Option<[Evals<OC::ScalarField>; 2]>,
 }
 
@@ -89,8 +99,9 @@ where
     where
         IC: PrimeSubgroup,
     {
-        let min_domain_size = pks.len() + 1; // extra 1 accounts apk accumulator initial value
-                                             // Before key validation: this is a lookup, validation is per key.
+        // One row more than keys: the affine-addition accumulator starts from its seed.
+        // Done before key validation: this is a lookup, validation is per key.
+        let min_domain_size = pks.len() + 1;
         let domains = D::for_min_size(min_domain_size)?;
         let domain = domains.base();
 
@@ -137,7 +148,7 @@ where
         &self.pks
     }
 
-    // Actual number of signers, not including the padding
+    /// Actual number of signers, without including the padding.
     pub fn size(&self) -> usize {
         self.pks.len()
     }
@@ -147,6 +158,7 @@ where
         self.domains.base()
     }
 
+    /// Evaluates the key polynomials over the large domain.
     pub fn amplify(&mut self) {
         let domains = Domains::<OC::ScalarField, D>::from_set(self.domains.clone());
         let pks_evals_x4 = self
@@ -156,6 +168,9 @@ where
         self.pks_evals_x4 = Some(pks_evals_x4);
     }
 
+    /// Commits to the two key polynomials, recording the domain size and key count alongside.
+    ///
+    /// Fails if `committer_key` does not reach degree `n - 1`.
     pub fn commit<S>(
         &self,
         committer_key: &S::CK,
@@ -184,6 +199,7 @@ where
         })
     }
 
+    /// The sum of the keys `bitmask` selects: the aggregate public key a proof will claim.
     pub fn aggregate(&self, bitmask: &[bool]) -> Result<IC, ApkError> {
         if bitmask.len() != self.size() {
             return Err(ApkError::BitmaskLengthMismatch {

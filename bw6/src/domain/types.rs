@@ -153,6 +153,31 @@ impl std::error::Error for DomainError {}
 /// prover after the caller has already built a keyset.
 pub trait SupportsPackedScheme {}
 
+/// The naive O(n^2) DFT: the polynomial with coefficients `coeffs`, evaluated at
+/// `1, w, w^2, ..., w^(n-1)` by Horner's rule at each point.
+///
+/// Shared by `NaiveDomain` and the naive leaves of the Cooley-Tukey plan.
+pub(crate) fn evaluate_at_powers<F: PrimeField>(coeffs: &[F], w: F, n: usize) -> Vec<F> {
+    debug_assert!(
+        coeffs.len() <= n,
+        "{} coefficients for {} points",
+        coeffs.len(),
+        n
+    );
+    let mut result = Vec::with_capacity(n);
+    let mut point = F::one();
+    for _ in 0..n {
+        result.push(
+            coeffs
+                .iter()
+                .rev()
+                .fold(F::zero(), |acc, &c| acc * point + c),
+        );
+        point *= w;
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,7 +232,8 @@ mod tests {
         // 517 = 11 * 47, the first table entry past the threshold.
         let domain = CooleyTukeyDomain::<Fr>::new(517).unwrap();
 
-        // Degree 4n - 3 is the highest the prover's constraint polynomial reaches.
+        // Degree 4n - 3 is the highest the prover's constraint polynomial reaches, once
+        // multiplied by its selector; the quotient is then degree 3n - 3.
         let quotient = DensePolynomial::from_coefficients_vec(
             (0..3 * 517 - 2).map(|_| Fr::rand(rng)).collect(),
         );

@@ -198,7 +198,8 @@ impl<F: FftField> AffineAdditionEvaluations<F> {
     }
 }
 
-/// Register polynomials in evaluation form amplified to support degree 4n constraints
+/// The affine-addition registers, as polynomials and as evaluations over the large domain, where
+/// the constraint products (up to degree `4n - 4`) are formed pointwise.
 pub struct AffineAdditionRegisters<F: PrimeField, D: DomainSet<F>> {
     pub domains: Domains<F, D>,
     bitmask: Evals<F>,
@@ -426,8 +427,9 @@ where
         let [x1, y1] = &registers.partial_sums;
         let [x2, y2] = &registers.keyset;
         // The shifted registers, acc(Xw). Delegated because the cheap way to compute them —
-        // rotating the evaluation vector — is only valid when the domains are nested, which
-        // holds for radix-2 and never for BW6-767.
+        // rotating the evaluation vector — is only valid when the base domain nests in the
+        // large one. Both production triples (n, 4n and n, 6n) do, but the trait only promises
+        // capacity.
         let [acc_x_poly, acc_y_poly] = &registers.polynomials.partial_sums;
         let next_partial_sums = [
             registers.domains.shift_over_4x(acc_x_poly, x1),
@@ -499,9 +501,9 @@ where
         DensePolynomial<OC::ScalarField>,
     ) {
         let [x1, y1] = &registers.partial_sums;
-        // The accumulator's first and last values. Reading them out of the 4x evaluation vector
-        // at index `4 * i` would assume the base domain sits inside it at stride 4 — true for
-        // radix-2, impossible for BW6-767, where 4 does not divide q - 1. Evaluating the
+        // The accumulator's first and last values. Reading them out of the large-domain
+        // evaluation vector at a fixed stride would assume the base domain nests at that index
+        // — 4 on APK-377, 6 on APK-381, and not guaranteed by the trait at all. Evaluating the
         // register polynomial at w^0 and w^(n-1) is exact for any domain and costs O(n) here,
         // against the O(n log n) transforms that dominate.
         let [acc_x_poly, acc_y_poly] = &registers.polynomials.partial_sums;
@@ -528,7 +530,6 @@ where
         (a4_poly, a5_poly)
     }
 
-    // pub fn evaluate_public_inputs_constraints<F: FftField, Affine: AffineRepr<BaseField = F> + std::borrow::Borrow<ark_ec::short_weierstrass::Affine<P>>, P: SWCurveConfig>(
     /// Both points must have affine coordinates. `h` always does, being a fixed point off the
     /// identity; `h + apk` does for any `apk` in G1, since `h` is outside G1. An `apk` outside
     /// G1 can make `h + apk` the identity, and is rejected here.

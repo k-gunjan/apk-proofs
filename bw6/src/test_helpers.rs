@@ -4,11 +4,14 @@
 //! proof sizes (BW6-767 group elements are one byte longer) and the absence of `packed` on
 //! APK-381, every function below is called twice with nothing but the config type changed.
 
-use ark_ec::{AffineRepr, CurveGroup, PrimeGroup};
-use ark_ff::{FftField, One, Zero};
+use ark_ec::{
+    short_weierstrass::{Affine, Projective, SWCurveConfig},
+    AffineRepr, CurveConfig, CurveGroup, PrimeGroup,
+};
+use ark_ff::{FftField, One, PrimeField, Zero};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
-use ark_std::rand::Rng;
 use ark_std::{end_timer, start_timer, test_rng};
+use ark_std::{rand::Rng, UniformRand};
 use w3f_pcs::pcs::{PcsParams, PCS};
 
 use crate::config::{
@@ -18,6 +21,88 @@ use crate::config::{
 };
 use crate::domain::{DomainSet, FftDomain};
 use crate::{Bitmask, CommitmentExt, PublicInput};
+
+/// A uniformly random point of `E(Fq)`, not only of G1.
+pub fn random_curve_point<P: SWCurveConfig, R: Rng>(rng: &mut R) -> Affine<P> {
+    loop {
+        let x = P::BaseField::rand(rng);
+        if let Some(p) = Affine::<P>::get_point_from_x_unchecked(x, false) {
+            return p;
+        }
+    }
+}
+/// Divides little-endian limbs by a small `d`, returning the quotient and the remainder.
+pub fn div_small(limbs: &[u64], d: u64) -> (Vec<u64>, u64) {
+    let mut q = vec![0u64; limbs.len()];
+    let mut rem: u128 = 0;
+    for i in (0..limbs.len()).rev() {
+        let cur = (rem << 64) | limbs[i] as u128;
+        q[i] = (cur / d as u128) as u64;
+        rem = cur % d as u128;
+    }
+    (q, rem as u64)
+}
+
+/// A point of order exactly `l`, for a prime `l` dividing the cofactor.
+///
+/// Clears the G1 component with `[r]`, then every factor of the cofactor but `l`, then
+/// multiplies by `l` until one more step would reach the identity.
+pub fn point_of_order<P: SWCurveConfig, R: Rng>(l: u64, rng: &mut R) -> Projective<P> {
+    let mut h_prime = P::COFACTOR.to_vec();
+    loop {
+        let (q, rem) = div_small(&h_prime, l);
+        if rem != 0 {
+            break;
+        }
+        h_prime = q;
+    }
+    assert_ne!(
+        h_prime,
+        P::COFACTOR.to_vec(),
+        "{} does not divide the cofactor",
+        l
+    );
+    for _ in 0..16 {
+        let p = random_curve_point::<P, _>(rng).into_group();
+        let mut t = p
+            .mul_bigint(<P as CurveConfig>::ScalarField::MODULUS)
+            .mul_bigint(&h_prime);
+        if t.is_zero() {
+            continue;
+        }
+        while !t.mul_bigint([l]).is_zero() {
+            t = t.mul_bigint([l]);
+        }
+        return t;
+    }
+    panic!("no point of order {} found", l);
+}
+/// Checks `test` against G1, the identity, points of each small order `l` dividing the
+/// cofactor, those points shifted by a G1 point, and random points of `E(Fq)`.
+pub fn check_exact<P: SWCurveConfig>(test: impl Fn(&Projective<P>) -> bool, small_orders: &[u64]) {
+    let rng = &mut test_rng();
+    let g = Projective::<P>::generator();
+    assert!(test(&g));
+    assert!(test(&Projective::<P>::zero()));
+    for _ in 0..4 {
+        assert!(test(&Projective::<P>::rand(rng)));
+    }
+    for &l in small_orders {
+        let t = point_of_order::<P, _>(l, rng);
+        assert!(!t.is_zero() && t.mul_bigint([l]).is_zero());
+        assert!(!test(&t), "a point of order {} passes", l);
+        assert!(
+            !test(&(t + g)),
+            "G1 shifted by a point of order {} passes",
+            l
+        );
+    }
+    for _ in 0..8 {
+        let p = random_curve_point::<P, _>(rng);
+        assert!(!p.is_in_correct_subgroup_assuming_on_curve());
+        assert!(!test(&p.into_group()));
+    }
+}
 
 pub(crate) fn _random_bits<R: Rng>(n: usize, density: f64, rng: &mut R) -> Vec<bool> {
     (0..n).map(|_| rng.gen_bool(density)).collect()
@@ -125,16 +210,22 @@ fn _test_prove_verify<C, ProofT, PI, P, V>(
 // BW6-761's 377). Compressed G1 points do not: BW6-767's base field is 767 bits, which fills 96
 // bytes to within one spare bit, leaving no room for the two flags arkworks needs for the
 // infinity marker and the y-sign, so the encoding spills into a 97th byte. BW6-761's 761-bit
-// base field leaves seven spare bits and stays at 96, which arkworks compresses to 48 per
-// coordinate-free point.
+// base field leaves seven spare bits, so its compressed points (the x-coordinate plus the two
+// flags) fit in 96.
 // ---------------------------------------------------------------------------------------------
 
-/// Bytes per compressed group element and per field element, for a configuration.
+/// The compressed size of a proof with `commitments` group elements of `group_bytes` each and
+/// `field_elements` field elements of 48 bytes each (both scalar fields fit in 384 bits).
+///
+/// arkworks writes a field element with no flags. Its size is ceil(modulus_bits / 8):
+/// ceil(377 / 8) = 48 bytes, with 7 spare bits
+/// ceil(381 / 8) = 48 bytes, with 3 spare bits
+/// Both fit in 384 bits = 48 bytes, hence the hard-coded * 48 for both setups.
 fn proof_size(commitments: usize, field_elements: usize, group_bytes: usize) -> usize {
     commitments * group_bytes + field_elements * 48
 }
-
-const GROUP_BYTES_761: usize = 96; // two 48-byte halves
+// BIT_SIZE = 2, Group bytes size = ceil((field_bits + BIT_SIZE) / 8)
+const GROUP_BYTES_761: usize = 96; // x-coordinate, flags in its spare bits
 const GROUP_BYTES_767: usize = 97;
 
 // ---------------------------------------------------------------------------------------------
@@ -391,7 +482,7 @@ pub fn test_undersized_srs_is_reported_at_prover_construction() {
     let rng = &mut test_rng();
     type C = Bls12_377Config;
 
-    // 255 keys need a domain of 256; 300 need 512, and so an SRS three times larger.
+    // 255 keys need a domain of 256; 300 need 512, and so an SRS twice as large.
     // Insecure source (trapdoor sampled locally): tests only.
     let params = Apk::<C>::setup(&mut crate::setup::InsecureSetup::new(rng), 255).unwrap();
     let pks = random_pks::<_, <C as ApkConfig>::InnerCurve>(300, rng);

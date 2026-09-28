@@ -196,13 +196,4 @@ where
         commitments: &Self::C1,
         extra_commitments: &Self::C2,
     ) -> OC;
-
-    // fn evaluate_constraint_polynomials(
-    //     &self,
-    //     apk: ark_bls12_377::G1Affine,
-    //     evals_at_zeta: &LagrangeEvaluations<Fr>,
-    //     r: Fr,
-    //     bitmask: &Bitmask,
-    //     domain_size: u64,
-    // ) -> Vec<Fr>;
 }

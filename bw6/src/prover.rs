@@ -17,6 +17,9 @@ use crate::{
     CountingPublicInput, Keyset, KeysetCommitment, PackedProof, Proof, PublicInput, SimpleProof,
 };
 
+/// Produces proofs for one keyset. Construction does the per-keyset work — checking the SRS is
+/// large enough, binding the parameters and the keyset commitment into the transcript, and
+/// evaluating the keys over the large domain — once, for every proof that follows.
 pub struct Prover<IC, OC, S, D>
 where
     IC: AccumulatorSeed,
@@ -142,9 +145,9 @@ where
             });
         }
         let bits = bitmask.to_bits();
-        // Checked on the bits themselves rather than `count_ones`, which also counts padding
-        // bits, and a deserialized bitmask may have those set.
-        // The EC identity doesn't have an affine representation.
+        // At least one signer: otherwise the aggregate key is the identity, which has no affine
+        // representation. Checked on the bits themselves rather than `count_ones`, which also
+        // counts padding bits, and a deserialized bitmask may have those set.
         if !bits.iter().any(|b| *b) {
             return Err(ApkError::NoSigners);
         }
@@ -174,7 +177,6 @@ where
         let r = <Transcript as ApkTranscript<OC::ScalarField>>::get_bitmask_aggregation_challenge(
             &mut transcript,
         );
-        // let acc_registers = D::wrap(registers, b, r);
         let acc_register_polynomials = protocol.get_register_polynomials_to_commit2(r);
         let acc_register_commitments =
             acc_register_polynomials.commit(|p| self.commit(p, "commit to 2nd round registers"))?;

@@ -1,14 +1,13 @@
 //! KZG polynomial commitment scheme for BLS12-377 + BW6-761
 //!
-//! This module provides type aliases for APK proofs using KZG (Kate-Zaverucha-Goldberg)
-//! polynomial commitments on the BW6-761 curve.
+//! Type aliases for APK proofs using KZG (Kate-Zaverucha-Goldberg) polynomial commitments on
+//! BW6-761, as implemented by `w3f-pcs` (<https://github.com/paritytech/fflonk>).
 //!
-//! ## Features
-//!
-//! - **Trusted setup**: Requires a one-time trusted setup ceremony
-//! - **Proof size**: Constant-size proofs (single group element)
-//! - **Verification**: Single pairing check for batch verification
-//! - **Efficiency**: Very efficient option for proof size and verification time
+//! - **Trusted setup**: the parameters embed powers of a secret `tau` and must come from a
+//!   setup ceremony; see [`crate::setup`].
+//! - **Commitments and opening proofs**: one BW6-761 G1 point each.
+//! - **Verification**: the verifier's two opening claims (at `zeta` and `zeta * omega`) are
+//!   batched into one pairing-product check by `w3f-pcs`'s `batch_verify`.
 
 use ark_bw6_761::BW6_761;
 use w3f_pcs::pcs::commitment::WrappedAffine;
@@ -22,10 +21,10 @@ use crate::{CountingProof, KeysetCommitment, PackedProof, Prover, SimpleProof, V
 // ============================================================================
 
 /// KZG polynomial commitment scheme on BW6-761
-pub type PcsKzgBw6_761 = KZG<BW6_761>;
+pub type Pcs = KZG<BW6_761>;
 
 /// KZG commitment (a single BW6-761 G1 point)
-pub type CommitmentKzgBw6_761 = WrappedAffine<OuterCurve>;
+pub type Commitment = WrappedAffine<OuterCurve>;
 
 // ============================================================================
 // Core Types with KZG
@@ -33,43 +32,29 @@ pub type CommitmentKzgBw6_761 = WrappedAffine<OuterCurve>;
 
 /// Keyset commitment using KZG on BW6-761
 ///
-/// Contains commitments to the two Lagrange-basis polynomials representing
-/// the x and y coordinates of the public keys.
-pub type KeysetCommitmentKzgBw6_761 = KeysetCommitment<OuterScalar, CommitmentKzgBw6_761>;
+/// Commitments to the two polynomials interpolating the x and y coordinates of the public
+/// keys, plus the domain size and key count the verifier needs.
+pub type KeysetCommitment377 = KeysetCommitment<OuterScalar, Commitment>;
 
 /// Prover for BLS12-377 + BW6-761 with KZG commitments
-pub type ProverBls12_377Bw6_761Kzg =
-    Prover<InnerCurve, OuterCurve, PcsKzgBw6_761, super::Domains761>;
+pub type Prover377 = Prover<InnerCurve, OuterCurve, Pcs, super::Domains761>;
 
 /// Verifier for BLS12-377 + BW6-761 with KZG commitments
-pub type VerifierBls12_377Bw6_761Kzg =
-    Verifier<InnerCurve, OuterCurve, PcsKzgBw6_761, super::Domains761>;
+pub type Verifier377 = Verifier<InnerCurve, OuterCurve, Pcs, super::Domains761>;
 
 // ============================================================================
 // Proof Type Aliases
 // ============================================================================
 
-/// Simple (basic) APK proof using KZG commitments
-///
-/// This is the most straightforward proof that includes:
-/// - Commitments to partial sum polynomials
-/// - Quotient polynomial commitment
-/// - KZG opening proofs
-/// - Evaluations at the challenge point
-pub type SimpleProofKzgBw6_761 =
-    SimpleProof<OuterScalar, OuterAffine, CommitmentKzgBw6_761, OuterAffine>;
+/// The 'basic' accountable scheme's proof: the bitmask is public and the verifier evaluates it
+/// itself.
+pub type SimpleProof377 = SimpleProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
 
-/// Packed (succinct) APK proof using KZG commitments
-///
-/// This proof packs the bitmask into field elements for better efficiency
-/// when the bitmask is large. Includes additional commitments and evaluations
-/// for the packing verification.
-pub type PackedProofKzgBw6_761 =
-    PackedProof<OuterScalar, OuterAffine, CommitmentKzgBw6_761, OuterAffine>;
+/// The 'packed' accountable scheme's proof: the prover commits to the bitmask, and the verifier
+/// checks it against the public bitmask packed into 256-bit chunks: one field operation per
+/// chunk instead of per bit. See the "packed" scheme in <https://eprint.iacr.org/2022/1205>.
+pub type PackedProof377 = PackedProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;
 
-/// Counting APK proof using KZG commitments
-///
-/// This proof only commits to the count of participants rather than their
-/// specific identities. More efficient when only the threshold matters.
-pub type CountingProofKzgBw6_761 =
-    CountingProof<OuterScalar, OuterAffine, CommitmentKzgBw6_761, OuterAffine>;
+/// The 'counting' scheme's proof: the public input is the number of signers, not the bitmask,
+/// so the proof shows that many keys were aggregated without saying which.
+pub type CountingProof377 = CountingProof<OuterScalar, OuterAffine, Commitment, OuterAffine>;

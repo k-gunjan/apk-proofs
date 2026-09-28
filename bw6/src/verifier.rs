@@ -21,13 +21,20 @@ use crate::{
 
 type Transcript = MerlinTranscript;
 
+/// The verifier challenges, recomputed from the transcript.
 pub struct Challenges<F: FftField> {
+    /// Bitmask-chunk aggregation challenge (used by 'packed' only).
     pub r: F,
+    /// Constraint aggregation challenge.
     pub phi: F,
+    /// Evaluation point.
     pub zeta: F,
+    /// Opening aggregation challenges, one per polynomial opened at `zeta`.
     pub nus: Vec<F>,
 }
 
+/// Checks proofs against one keyset commitment. Construction validates the commitment and
+/// binds it into the transcript once, for every proof that follows.
 pub struct Verifier<IC, OC, S, D>
 where
     IC: AccumulatorSeed,

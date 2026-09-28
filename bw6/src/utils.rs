@@ -6,7 +6,7 @@ use ark_poly::Polynomial;
 use crate::domain::FftDomain;
 use crate::Bitmask;
 
-// Evaluates a polynomial represented as evaluations over a radix-2 domain (aka in Lagrange basis) at a point.
+// Evaluates a polynomial represented as evaluations over a multiplicative subgroup (aka in Lagrange basis) at a point.
 // f = sum(fi * Li), where Li is the i-th Lagrange basis polynomial, and fi = f(w^i)
 // Li(z) = (z^n -1)/n * li(z), where li(z) := w^i /(z-w^i), see https://hackmd.io/xTta-c--SFyOv9Kl3Q9Jjw
 // Then f(z) = sum(fi * Li(z)) = (z^n -1)/n sum(fi * li(z))

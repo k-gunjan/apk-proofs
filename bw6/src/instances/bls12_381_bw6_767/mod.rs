@@ -1,21 +1,24 @@
-//! BLS12-381 + BW6-761 curve pairing instantiation
+//! APK-381: BLS12-381 signatures, proofs over BW6-767.
 //!
 //! This module provides type aliases and constants for APK proofs using:
-//! - **Inner curve**: BLS12-381 G1 (for BLS signatures and public keys)
-//! - **Outer curve**: BW6-761 G1 (for proof generation and verification)
+//! - **Inner curve**: BLS12-381 G1, where the BLS public keys live.
+//! - **Outer curve**: BW6-767 G1, where the proof's commitments live. Both the prover and the
+//!   verifier do arithmetic here.
 //!
-//! The BLS12-381/BW6-761 pairing is particularly efficient for recursive
-//! proof composition due to the 2-chain structure where BW6-761's scalar
-//! field matches BLS12-381's base field.
+//! The two form a 2-chain: BW6-767's scalar field is BLS12-381's base field, so the inner
+//! curve's coordinates are native field elements of the proof system. BW6-767 is the BW6 curve
+//! over BLS12-381 from El Housni and Guillevic, "Families of SNARK-friendly 2-chains of
+//! elliptic curves", <https://eprint.iacr.org/2021/1359>; see also
+//! <https://hackmd.io/@gnark/bw6_bls12381>.
+//!
+//! Unlike BW6-761, its scalar field has two-adicity 1, which is what the mixed-radix domain
+//! machinery in [`crate::domain`] exists for.
 //!
 //! ## Polynomial Commitment Schemes
 //!
-//! This pairing supports multiple PCS implementations:
-//! - [`kzg`] - KZG commitments (default, most efficient)
+//! - [`kzg`]: KZG commitments on BW6-767, the only scheme implemented.
 
-// use ark_bls12_377::G1Projective as Bls12_377_G1;
 use ark_bls12_381::G1Projective as Bls12_381_G1;
-// use ark_bw6_761::{Fq, Fr, G1Affine as BW6_761_G1Affine, G1Projective as BW6_761_G1};
 use ark_bw6_767::{Fr, G1Affine as BW6_767_G1Affine, G1Projective as BW6_767_G1};
 
 use crate::{AccountablePublicInput, CountingPublicInput, Keyset};
@@ -26,9 +29,6 @@ use crate::{AccountablePublicInput, CountingPublicInput, Keyset};
 
 /// KZG polynomial commitment scheme types for this pairing
 pub mod kzg;
-
-// Future: Other PCS implementations
-// pub mod ipa;
 
 // ============================================================================
 // Curve Type Aliases
@@ -45,42 +45,46 @@ pub type InnerCurve = Bls12_381_G1;
 /// The pairing the inner curve belongs to. Needed to sign with these keys; see [`crate::bls`].
 pub type InnerPairing = ark_bls12_381::Bls12_381;
 
-/// Outer curve: BW6-761 G1 (projective)
+/// Outer curve: BW6-767 G1, in projective form.
 ///
-/// Used for:
-/// - Proof generation computations
-/// - Polynomial commitments
-/// - All arithmetic during proving
+/// The group the commitments and opening proofs live in, used by both sides of the protocol:
+/// - the prover commits to its polynomials and computes the opening proofs here;
+/// - the verifier checks every proof point for membership in G1 (see
+///   [`crate::PrimeSubgroup`]), rebuilds the commitment to the linearization polynomial and
+///   aggregates the commitments opened at `zeta` as linear combinations here, and hands the
+///   result to the KZG pairing check on BW6-767.
+///
+/// The projective form is what the group arithmetic uses; points are stored and serialized in
+/// [`OuterAffine`] form.
 pub type OuterCurve = BW6_767_G1;
 
-/// Outer curve: BW6-767 G1 (affine)
+/// Outer curve: BW6-767 G1, in affine form.
 ///
-/// Used for:
-/// - Serialization
-/// - Verification
-/// - Commitment points in proofs
+/// The representation of every outer-curve point that is stored or serialized: keyset and
+/// register commitments, the quotient commitment, and KZG opening proofs.
 pub type OuterAffine = BW6_767_G1Affine;
 
-/// Outer curve scalar field: BW6-761 Fr
+/// Outer curve scalar field: BW6-767 Fr.
 ///
-/// This field equals BLS12-381's base field (Fq), enabling
-/// efficient recursive composition.
+/// Equal to BLS12-381's base field `Fq`, so BLS12-381 point coordinates are elements of it.
+/// All polynomial arithmetic in the proof system happens over this field.
 pub type OuterScalar = Fr;
 
 // ============================================================================
 // PCS-Independent Type Aliases
 // ============================================================================
 
-/// Keyset for BLS12-381 public keys with BW6-761 operations
-///
-/// This type is independent of the polynomial commitment scheme used.
 /// The base domain sizes available to APK-381, ascending.
 ///
-/// BW6-767's scalar field has `q - 1 = 2 * 3^2 * 11 * 23 * 47 * 10177 * (unusable large part)`.
+/// BW6-767's scalar field has
+/// `q - 1 = 2 * 3^2 * 11 * 23 * 47 * 10177 * 859267 * 52437899 * (a 305-bit remainder)`. The
+/// two primes after 10177 are out of reach: Rader's algorithm would need a convolution domain of
+/// at least `2p - 3` points with prime factors at most 64, and the largest such subgroup order
+/// here is `2 * 3^2 * 11 * 23 * 47 = 214038`. So the usable part stops at 10177.
 /// Two of those factors are **reserved** rather than spent on the base domain: one 2 and one 3,
 /// so that `6n` divides `q - 1` whenever `n` does. That fixes the triple as `n, 2n, 6n` —
-/// `2n >= 2n - 1` and `6n >= 4n - 2`, both nested inside each other — and leaves the base sizes
-/// as the divisors of
+/// `2n >= 2n - 1` and `6n >= 4n - 3`, each a multiple of `n` so the domains nest — and leaves
+/// the base sizes as the divisors of
 ///
 /// ```text
 /// 3 * 11 * 23 * 47 * 10177 = 363,044,121
@@ -95,24 +99,16 @@ pub type OuterScalar = Fr;
 /// the 3 on the base domain would close the gaps, but then `2n` and `6n` would not exist and the
 /// three domains would have to be chosen independently and would not nest.
 ///
-/// Validator-set sizes of interest sit comfortably inside: Kusama's ~1000 lands on 1081 = 23*47
-/// and Polkadot's ~1500 on 1551 = 3*11*47.
-///
 /// **Two divisors are deliberately absent: 10177 and 30531 = 3 * 10177.** Both are dominated —
 /// the next entry up is larger *and* cheaper to transform, because 10177 is prime and has to go
-/// through Rader's algorithm at roughly four times the per-point cost of a smooth radix. By the
-/// cost model these sizes were selected with, one proof over 10177 is about 255M field
-/// multiplications against 76M for `11891 = 11*23*47`, a domain only 17% bigger; 30531 is about
-/// 772M against 234M for `35673 = 3*11*23*47`. Dropping them is what makes transform cost
-/// increase with size across the whole table, which in turn is what lets domain selection be a
-/// plain binary search rather than a runtime ranking.
+/// through Rader's algorithm rather than a naive small-radix DFT.
 ///
 /// Entries from 111947 up still carry the factor 10177 and still need Rader. There is no smooth
 /// alternative that high, so nothing dominates them and they stay.
 ///
-/// Every claim above is asserted in this module's tests rather than trusted: that each entry is
-/// a divisor, that `6n` really is a subgroup order of this field, and that the two omissions are
-/// the dominated ones.
+/// The structural claims above are asserted in this module's tests: that each entry is a
+/// divisor, that `2n` and `6n` really are subgroup orders of this field, and that the two
+/// omissions are the only divisors missing. The cost figures are not.
 pub const APK381_DOMAIN_SIZES: &[usize] = &[
     1,         // 1
     3,         // 3
@@ -125,12 +121,12 @@ pub const APK381_DOMAIN_SIZES: &[usize] = &[
     253,       // 11 * 23
     517,       // 11 * 47
     759,       // 3 * 11 * 23
-    1081,      // 23 * 47          <- Kusama, ~1000 validators
-    1551,      // 3 * 11 * 47      <- Polkadot, ~1500 validators
+    1081,      // 23 * 47
+    1551,      // 3 * 11 * 47
     3243,      // 3 * 23 * 47
-    11891,     // 11 * 23 * 47     <- 10177 omitted: prime, and 11891 is cheaper
-    35673,     // 3 * 11 * 23 * 47 <- 30531 = 3 * 10177 omitted for the same reason
-    111947,    // 11 * 10177       <- Rader from here on, with no smooth alternative
+    11891,     // 11 * 23 * 47
+    35673,     // 3 * 11 * 23 * 47
+    111947,    // 11 * 10177
     234071,    // 23 * 10177
     335841,    // 3 * 11 * 10177
     478319,    // 47 * 10177
@@ -153,13 +149,13 @@ pub struct Apk381DomainSizes;
 impl crate::DomainSizes<OuterScalar> for Apk381DomainSizes {
     /// Reads the base size off [`APK381_DOMAIN_SIZES`] and expands it to `n, 2n, 6n`.
     ///
-    /// `2n` and `6n` rather than the protocol's bare floors of `2n - 1` and `4n - 2` because
-    /// these are the sizes this field actually has. One factor of 2 and one of 3 are held back
-    /// out of `q - 1` when the table is built, precisely so that `2n` and `6n` remain subgroup
-    /// orders for every entry. They clear the floors with room to spare — `2n >= 2n - 1` and
-    /// `6n >= 4n - 2` — and, being whole multiples of `n`, they nest, which is what lets the
-    /// shifted register be a rotation of the evaluation vector rather than an extra transform
-    /// over the largest domain in the protocol.
+    /// `2n` and `6n` rather than the protocol's bare floors of `2n - 1` and `4n - 3` because
+    /// these are the sizes this field actually has: `4n` never is, since `4 ∤ q - 1`. One
+    /// factor of 2 and one of 3 are held back out of `q - 1` when the table is built, precisely
+    /// so that `2n` and `6n` remain subgroup orders for every entry. They clear the floors —
+    /// `2n >= 2n - 1` and `6n >= 4n - 3` — and, being whole multiples of `n`, they nest, which
+    /// is what lets the shifted register be a rotation of the evaluation vector rather than an
+    /// extra transform over the largest domain in the protocol.
     ///
     /// A field with a different factorisation would answer differently, and nothing above this
     /// function knows or cares which numbers come back.
@@ -172,7 +168,7 @@ impl crate::DomainSizes<OuterScalar> for Apk381DomainSizes {
 
 /// Evaluation domains for BW6-767's scalar field.
 ///
-/// Two-adicity is 1 there, so radix-2 does not exist: no power-of-two domain beyond size 2, and
+/// Two-adicity is 1 there, so radix-2 does not apply: no power-of-two domain beyond size 2, and
 /// no domain size divisible by 4 at all. Sizes come from [`APK381_DOMAIN_SIZES`] and are
 /// transformed by mixed-radix Cooley-Tukey, with Rader for the factor 10177.
 pub type Domains767 = crate::SmoothDomainSet<OuterScalar, Apk381DomainSizes>;
@@ -181,6 +177,9 @@ pub type Domains767 = crate::SmoothDomainSet<OuterScalar, Apk381DomainSizes>;
 /// the triple is what makes the sizes `n, 2n, 6n` line up.
 pub type Domain767 = crate::CooleyTukeyDomain<OuterScalar>;
 
+/// Keyset of BLS12-381 public keys, interpolated over BW6-767's scalar field.
+///
+/// Independent of the polynomial commitment scheme.
 pub type Keyset381 = Keyset<InnerCurve, OuterCurve, Domains767>;
 
 /// Accountable public input for simple and packed proof schemes
@@ -213,18 +212,17 @@ pub type CountingPublicInput381 = CountingPublicInput<InnerCurve>;
 /// - `G1Jac.IsInSubGroup`, `[r]P` is the identity:
 ///   <https://github.com/yelhousni/gnark-crypto/blob/df9b9feabb6ada6024e5c4648ca54cb968bd69bf/ecc/bw6-767/g1.go#L369-L376>
 ///
-/// It needs no constant beyond the curve's own and follows from the definition of G1, so there
-/// is nothing to audit.
-///
-/// arkworks provides no endomorphism for BW6-767, and no endomorphism-based membership test for
-/// it has been published.
+/// `ark-bw6-767` 0.6 provides no endomorphism (no `GLVConfig`) for G1, so the faster test used
+/// for BW6-761 in [`crate::endo`] has no ready-made constants here.
 impl crate::PrimeSubgroup for ark_ec::short_weierstrass::Projective<ark_bw6_767::g1::Config> {
     fn is_in_prime_subgroup(p: &BW6_767_G1Affine) -> bool {
         crate::generic_subgroup_check(p)
     }
 }
 
-/// arkworks' own check, which for BLS12-381 G1 is already endomorphism-based.
+/// arkworks' own check, which for BLS12-381 G1 is already endomorphism-based: `ark-bls12-381`
+/// overrides `is_in_correct_subgroup_assuming_on_curve` with Scott's test, checking
+/// `φ(P) = -[x^2]P`; Section 6 of <https://eprint.iacr.org/2021/1130>.
 impl crate::PrimeSubgroup for ark_ec::short_weierstrass::Projective<ark_bls12_381::g1::Config> {
     fn is_in_prime_subgroup(p: &ark_bls12_381::G1Affine) -> bool {
         crate::generic_subgroup_check(p)
