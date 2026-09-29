@@ -467,6 +467,9 @@ where
 }
 
 /// Parses `VALIDATORS [N_ERAS]` from the command line.
+///
+/// `example` is the example target, used only in the hint printed when `VALIDATORS` is missing;
+/// which configuration runs is fixed by the calling `main`.
 pub fn parse_args(example: &str, default_validators: usize, default_eras: usize) -> (usize, usize) {
     let mut args = std::env::args();
     args.next();
@@ -475,7 +478,9 @@ pub fn parse_args(example: &str, default_validators: usize, default_eras: usize)
         Some(a) => a.parse().expect("invalid VALIDATORS"),
         None => {
             println!(
-                "VALIDATORS not given, using {}. Run with '--example {} VALIDATORS N_ERAS'.",
+                "VALIDATORS not given, using {}. To choose the validator set size and the \
+                 number of eras, pass them after `--`, e.g.\n  \
+                 cargo run --release --features \"parallel print-trace\" --example {} -- 1023 2",
                 default_validators, example
             );
             default_validators

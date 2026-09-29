@@ -278,17 +278,17 @@ where
     );
 }
 
-pub fn test_simple_scheme(keyset_size: usize) {
+pub fn test_simple_scheme_377(keyset_size: usize) {
     test_simple_scheme_for::<Bls12_377Config>(keyset_size, GROUP_BYTES_761);
 }
 
-pub fn test_counting_scheme(keyset_size: usize) {
+pub fn test_counting_scheme_377(keyset_size: usize) {
     test_counting_scheme_for::<Bls12_377Config>(keyset_size, GROUP_BYTES_761);
 }
 
 /// `packed` exists only on APK-377, so it is not written against a generic config: the bound
 /// that would let it be is exactly the one [`Bls12_381Config`] does not satisfy.
-pub fn test_packed_scheme(keyset_size: usize) {
+pub fn test_packed_scheme_377(keyset_size: usize) {
     type C = Bls12_377Config;
     _test_prove_verify::<C, PackedProofOf<C>, AccountablePublicInputOf<C>, _, _>(
         // Insecure source (trapdoor sampled locally): tests only.

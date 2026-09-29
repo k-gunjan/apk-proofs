@@ -330,18 +330,18 @@ mod tests {
     }
 
     #[test]
-    fn test_simple_scheme() {
-        test_helpers::test_simple_scheme(255);
+    fn test_simple_scheme_377() {
+        test_helpers::test_simple_scheme_377(255);
     }
 
     #[test]
-    fn test_packed_scheme() {
-        test_helpers::test_packed_scheme(255);
+    fn test_packed_scheme_377() {
+        test_helpers::test_packed_scheme_377(255);
     }
 
     #[test]
-    fn test_counting_scheme() {
-        test_helpers::test_counting_scheme(255);
+    fn test_counting_scheme_377() {
+        test_helpers::test_counting_scheme_377(255);
     }
 
     // APK-381. 516 keys need a domain of at least 517, which is 11 * 47 exactly; the expanded

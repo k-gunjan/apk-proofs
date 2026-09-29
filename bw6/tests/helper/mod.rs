@@ -5,13 +5,17 @@ use std::env;
 /// Deliberately not a `log_n`: what the caller has is a number of validators, and which
 /// evaluation domain that implies is the configuration's business. On APK-381 no domain is a
 /// power of two, so a logarithm would name nothing.
-pub fn parse_args_or(default_validators: usize, scheme: &str) -> usize {
+///
+/// `test_name` is the test target, used only in the hint printed when the argument is missing;
+/// which configuration runs is fixed by the calling binary.
+pub fn parse_args_or(default_validators: usize, test_name: &str) -> usize {
     match env::args().nth(1) {
         None => {
             println!(
-                "VALIDATORS parameter is not provided, using the default.\n\
-                 Run with '--test {} VALIDATORS', where VALIDATORS is the validator set size",
-                scheme
+                "VALIDATORS parameter is not provided, using {}. To choose the validator set \
+                 size, pass it after the test name, e.g.\n  \
+                 cargo test --release --features \"parallel print-trace\" --test {} 1023",
+                default_validators, test_name
             );
             default_validators
         }

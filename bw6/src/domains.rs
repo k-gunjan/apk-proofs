@@ -6,6 +6,9 @@ use ark_std::Zero;
 
 use crate::domain::{DomainSet, FftDomain};
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::*;
+
 /// Evaluations of a polynomial over some domain, in natural order.
 ///
 /// Replaces arkworks' `Evaluations`, which is tied to `EvaluationDomain` and so cannot be used
@@ -36,7 +39,7 @@ macro_rules! impl_pointwise_op {
             fn $assign_method(&mut self, rhs: &'a Evals<F>) {
                 assert_eq!(self.evals.len(), rhs.evals.len(), "evaluations over different domains");
                 ark_std::cfg_iter_mut!(self.evals)
-                    .zip(rhs.evals.iter())
+                    .zip(ark_std::cfg_iter!(rhs.evals))
                     .for_each(|(a, b)| *a $op b)
             }
         }

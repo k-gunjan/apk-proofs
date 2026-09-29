@@ -45,15 +45,23 @@ name = "apk_377"
 name = "apk_381"
 
 [[test]]
-name = "basic"
+name = "basic_377"
 harness = false
 
 [[test]]
-name = "packed"
+name = "packed_377"
 harness = false
 
 [[test]]
-name = "counting"
+name = "counting_377"
+harness = false
+
+[[test]]
+name = "basic_381"
+harness = false
+
+[[test]]
+name = "counting_381"
 harness = false
 
 [features]

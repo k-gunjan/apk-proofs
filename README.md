@@ -24,35 +24,46 @@ A video presentation of this work at sub0 2022 is [available here](https://www.y
 The argument is the number of validators. The write-up's results are for domains of size 2^10, 2^16 and 2^20, which on BLS12-377/BW6-761 means 2^k - 1 validators (one row of the domain is reserved for the accumulator's initial value).
 
 #### Basic Accountable Scheme 
-> cargo test --release --features "parallel print-trace" --test basic 1023
+> cargo test --release --features "parallel print-trace" --test basic_377 1023
 
-> cargo test --release --features "parallel print-trace" --test basic 65535
+> cargo test --release --features "parallel print-trace" --test basic_377 65535
 
-> cargo test --release --features "parallel print-trace" --test basic 1048575
+> cargo test --release --features "parallel print-trace" --test basic_377 1048575
  
 <br/>
 
 #### Packed Accountable Scheme
-> cargo test --release --features "parallel print-trace" --test packed 1023
+> cargo test --release --features "parallel print-trace" --test packed_377 1023
 
-> cargo test --release --features "parallel print-trace" --test packed 65535
+> cargo test --release --features "parallel print-trace" --test packed_377 65535
 
-> cargo test --release --features "parallel print-trace" --test packed 1048575
+> cargo test --release --features "parallel print-trace" --test packed_377 1048575
 
 <br/>
 
 #### Counting Scheme
-> cargo test --release --features "parallel print-trace" --test counting 1023
+> cargo test --release --features "parallel print-trace" --test counting_377 1023
 
-> cargo test --release --features "parallel print-trace" --test counting 65535
+> cargo test --release --features "parallel print-trace" --test counting_377 65535
 
-> cargo test --release --features "parallel print-trace" --test counting 1048575
+> cargo test --release --features "parallel print-trace" --test counting_377 1048575
 
 <br/>
 
-The output should look, for example, like this (single-threaded, `--test basic 1023`; timings are machine-dependent)
+#### The Same Schemes on BLS12-381 / BW6-767
+The commands above run on BLS12-377 / BW6-761 (APK-377), which is what the write-up measures. The basic and counting schemes also run on BLS12-381 / BW6-767 (APK-381); the packed scheme does not, as it needs domain sizes divisible by 256 and BW6-767 domain has no such size.
+
+> cargo test --release --features "parallel print-trace" --test basic_381 1023
+
+> cargo test --release --features "parallel print-trace" --test counting_381 1023
+
+APK-381 domains are not powers of two: the validator count plus one rounds up to the next entry of `APK381_DOMAIN_SIZES` (1023 validators use a domain of 1081 = 23 * 47), so the same validator count is not the same domain size on the two curves.
+
+<br/>
+
+The output should look, for example, like this (single-threaded, `--test basic_377 1023`; timings are machine-dependent)
 ```
-Running test for the 'basic' scheme for 1023 validators
+Running test for the 'basic' scheme on APK-377 (BLS12-377 / BW6-761) for 1023 validators
 Start:   signer set commitment
 End:     signer set commitment .....................................................199.144ms
 Start:   prover precomputation
