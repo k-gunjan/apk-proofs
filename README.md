@@ -85,3 +85,13 @@ Start:   verify
 ··End:     PCS verification ........................................................6.348ms
 End:     verify ....................................................................7.356ms
 ```
+
+# Running with Docker
+
+The [Dockerfile](Dockerfile) builds the crate and then runs the full test suite and the light-client simulation on both configurations (`apk_377` and `apk_381`, see [bw6/examples](bw6/examples/README.md)). Run from the repository root:
+
+> docker build -t apk-proofs .
+
+> docker run --rm apk-proofs
+
+`docker run --rm apk-proofs tests` runs the tests only, and `docker run --rm apk-proofs light-clients` the light clients only. The light-client size is set with `-e VALIDATORS=1500 -e ERAS=3` (defaults: 1000 validators, 2 eras).
