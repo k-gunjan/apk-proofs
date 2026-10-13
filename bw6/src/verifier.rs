@@ -433,6 +433,11 @@ where
                 &mut transcript,
                 batch_size,
             );
+        <Transcript as ApkTranscript<OC::ScalarField>>::append_opening_proofs(
+            &mut transcript,
+            &proof.w_at_zeta_proof,
+            &proof.r_at_zeta_omega_proof,
+        );
 
         (
             Challenges { r, phi, zeta, nus },

@@ -78,6 +78,11 @@ pub(crate) trait ApkTranscript<F: PrimeField> {
         self._get_128_bit_challenges(b"opening_aggregation", n)
     }
 
+    fn append_opening_proofs<P: CanonicalSerialize>(&mut self, at_zeta: &P, at_zeta_omega: &P) {
+        self._append_serializable(b"opening_proof_at_zeta", at_zeta);
+        self._append_serializable(b"opening_proof_at_zeta_omega", at_zeta_omega);
+    }
+
     fn _get_128_bit_challenge(&mut self, label: &'static [u8]) -> F;
 
     fn _get_128_bit_challenges(&mut self, label: &'static [u8], n: usize) -> Vec<F>;
